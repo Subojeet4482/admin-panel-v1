@@ -1,4 +1,4 @@
-"""4 BALL MATCH — server-authoritative 6x6 "connect four" for the user app (service 1 / Main panel).
+"""COIN BATTLE — server-authoritative 6x6 "connect four" for the user app (service 1 / Main panel).
 
 Why on the server: the game pays real wallet money. All rules (turns, wins, timers, payouts) run HERE with the Admin SDK;
 the phone only displays the board (it listens to ball_games/{gid}) and sends "drop in column N".
@@ -281,8 +281,8 @@ def create_game(p0, p1, stake, practice):
     if not practice:
         for p in (p0, p1):
             if p["bot"]: continue
-            if not debit(p["uid"], stake, "4 Ball Match entry"):
-                for q in taken: credit(q, stake, "4 Ball Match refund", "game_refund")
+            if not debit(p["uid"], stake, "Coin Battle entry"):
+                for q in taken: credit(q, stake, "Coin Battle refund", "game_refund")
                 return None, p["uid"]
             taken.append(p["uid"])
     first = random.choice((0, 1))
@@ -309,10 +309,10 @@ def finish(g, winner, reason):
         try:
             if not practice:
                 if winner == -1:
-                    for i in humans: credit(g["uids"][i], stake, "4 Ball Match — draw refund", "game_refund")
+                    for i in humans: credit(g["uids"][i], stake, "Coin Battle — draw refund", "game_refund")
                 elif winner in humans:
                     p = g["players"][winner]
-                    credit(p["uid"], prize, "4 Ball Match — You won", "game_win"); lb_add(p["uid"], p["name"], p["photo"], prize)
+                    credit(p["uid"], prize, "Coin Battle — You won", "game_win"); lb_add(p["uid"], p["name"], p["photo"], prize)
                     stat_add(p["uid"], wins=1, won=prize)
                 for i in humans:
                     if winner not in (i, -1): stat_add(g["uids"][i], losses=1, lost=stake)
@@ -389,7 +389,7 @@ def _key(practice, stake): return "p" if practice else f"s{stake}"
 
 def find(uid, entry, practice):
     c = cfg()
-    if not c["enabled"]: return {"error": "4 Ball Match is switched off right now"}
+    if not c["enabled"]: return {"error": "Coin Battle is switched off right now"}
     if practice:
         st = fb.get_db().collection("ball_stats").document(uid).get().to_dict() or {}
         used = int(st.get("practiceUsed", 0) or 0) if st.get("practiceDay") == today() else 0
