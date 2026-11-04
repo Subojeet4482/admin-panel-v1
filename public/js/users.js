@@ -123,14 +123,14 @@ Object.assign(window.A, {
     if(!uid) return A.toast('No user','err');
     if(!confirm('Verify (blue tick) dein?')) return;
     await setDoc(doc(db,'users',uid),{isVerified:true,verifiedAt:new Date().toISOString()},{merge:true});
-    try{ await A.api('/api/chatadm/verify',{body:{uid,verified:true}}); }catch(_){} A.toast('User verified ✓','ok'); A.closeModal('m-user'); A.loadUsers(true);
+    let cs=true; try{ await A.api('/api/chatadm/verify',{body:{uid,verified:true}}); }catch(_){ cs=false; } A.toast(cs?'User verified ✓ (chat tick on)':'Verified, but chat tick sync FAILED — open Chat Manager > Sync blue ticks', cs?'ok':'err'); A.closeModal('m-user'); A.loadUsers(true);
   },
   async unverifyUser() {
     const uid=document.getElementById('u-id').value;
     if(!uid) return A.toast('No user','err');
     if(!confirm('Verification remove karein?')) return;
     await setDoc(doc(db,'users',uid),{isVerified:false,verifiedAt:null},{merge:true});
-    try{ await A.api('/api/chatadm/verify',{body:{uid,verified:false}}); }catch(_){} A.toast('Verification removed','ok'); A.closeModal('m-user'); A.loadUsers(true);
+    let cs=true; try{ await A.api('/api/chatadm/verify',{body:{uid,verified:false}}); }catch(_){ cs=false; } A.toast(cs?'Verification removed':'Removed, but chat sync FAILED — use Sync blue ticks', cs?'ok':'err'); A.closeModal('m-user'); A.loadUsers(true);
   },
   async deleteUser() {
     const uid=document.getElementById('u-id').value;
