@@ -30,9 +30,31 @@ Object.assign(window.A, {
           <div class="muted" style="margin:-4px 0 10px;font-size:.7rem;">Default 24h. Expired messages are hidden in the app at once and deleted from the database by the Backup Center (daily) + by users' phones.</div>
           <button class="btn btn-primary btn-full" onclick="A.cmSaveWorld()"><i class="fa-solid fa-floppy-disk"></i> Save world room</button>
           <div class="btn-row" style="margin-top:10px;"><button class="btn btn-outline" style="flex:1;" onclick="A.cmMsgs('world','world','World room')"><i class="fa-solid fa-eye"></i> View messages</button><button class="btn btn-danger" style="flex:1;" onclick="A.cmWorldClear()"><i class="fa-solid fa-broom"></i> Clear all</button></div></div>
+        <div class="card fade-up"><div class="card-h"><i class="fa-solid fa-circle-check" style="color:#1d9bf0"></i> Blue ticks</div>
+          <div class="muted" style="margin-bottom:10px;font-size:.74rem;">Blue tick user: glowing blue tick + pink-purple name, and can <b>edit / delete any message</b> (World, groups, chats he is in). Works in the main chat database and in any separate chat project you connect later.</div>
+          <div style="display:flex;gap:8px;"><input class="inp" id="bt-q" placeholder="@username / Player ID / UID" autocomplete="off" style="flex:1;"><button class="btn btn-primary" onclick="A.cmTickGive()"><i class="fa-solid fa-circle-check"></i> Give</button></div>
+          <div id="bt-list" style="margin-top:10px;"></div>
+          <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="A.cmSyncTicks()"><i class="fa-solid fa-rotate"></i> Sync blue ticks to chat database</button></div>
         <div class="muted fade-up" style="padding:0 6px;">Rules: max 20 friends per user · messages can be edited / deleted by the sender only within 10 minutes.</div>`;
+    A.cmTickList();
     } catch (e) { $('cm-body').innerHTML = `<div class="empty-box" style="padding:24px;">${esc(e.message)}<br><small>Check FIREBASE_CREDENTIALS_B641 and the chat project.</small></div>`; }
   },
+  async cmTickList() {
+    const box = $('bt-list'); if (!box) return;
+    try {
+      const r = await A.api('/api/chatadm/verified');
+      box.innerHTML = r.users.length ? r.users.map(u => `<div class="cm-row">${av(u.name, u.photo)}<div class="mg-rt"><b>${esc(u.name)} <i class="fa-solid fa-circle-check" style="color:#1d9bf0"></i></b><small>${u.username ? '@' + esc(u.username) + ' · ' : ''}${esc(u.uid.slice(0, 10))}…</small></div><button class="btn btn-danger" style="padding:6px 10px;" onclick="A.cmTick('${esc(u.uid)}',false)"><i class="fa-solid fa-xmark"></i></button></div>`).join('') : '<div class="muted" style="padding:6px 0;">No blue tick users yet</div>';
+    } catch (e) { box.innerHTML = `<div class="muted">${esc(e.message)}</div>`; }
+  },
+  async cmTickGive() {
+    const q = ($('bt-q').value || '').trim(); if (!q) return A.toast('Enter @username, Player ID or UID', 'err');
+    try { await A.api('/api/chatadm/verify-by', { body: { q, verified: true } }); A.toast('Blue tick given ✓', 'ok'); $('bt-q').value = ''; A.cmTickList(); } catch (e) { A.fail(e); }
+  },
+  async cmTick(uid, on, reload) {
+    if (!on && !confirm('Remove blue tick?')) return;
+    try { await A.api('/api/chatadm/verify', { body: { uid, verified: on } }); A.toast(on ? 'Blue tick given ✓' : 'Blue tick removed', 'ok'); if (reload) A.cmUser(uid); else A.cmTickList(); } catch (e) { A.fail(e); }
+  },
+  async cmSyncTicks() { try { const r = await A.api('/api/chatadm/verify-sync', { body: {} }); A.toast(r.synced + ' blue ticks synced', 'ok'); } catch (e) { A.fail(e); } },
   async cmSaveWorld() {
     try { await A.api('/api/chatadm/world', { body: { emoji: $('cw-emoji').value, name: $('cw-name').value, tagline: $('cw-tag').value, slow: parseInt($('cw-slow').value, 10) || 0, locked: $('cw-lock').checked, ttlHours: parseInt($('cw-ttl').value, 10) || 24 } }); A.toast('World room saved ✓'); } catch (e) { A.fail(e); }
   },
@@ -60,10 +82,11 @@ Object.assign(window.A, {
       const d = await A.api('/api/chatadm/user/' + uid), p = d.profile; CM.cur = uid;
       const person = (x) => `<div class="cm-row">${av(x.name, x.photo)}<div class="mg-rt"><b>${esc(x.name)} ${x.starred ? '⭐' : ''}</b><small>@${esc(x.username || '')}${x.nick ? ' · nickname: ' + esc(x.nick) : ''}</small></div></div>`;
       const sec = (title, n, inner, open) => `<details class="card us-sec fade-up" ${open ? 'open' : ''}><summary>${title} <b>${n}</b></summary><div>${inner || '<div class="muted" style="padding:10px 0;">None</div>'}</div></details>`;
-      box.innerHTML = `<div class="card us-head fade-up"><div class="mgu-top">${av(p.name, p.photo).replace('cm-av', 'cm-av big')}<div style="flex:1;min-width:0;"><div class="mgu-name">${esc(p.name)} ${p.banned ? '<span class="tag red">BANNED</span>' : ''}</div>
+      box.innerHTML = `<div class="card us-head fade-up"><div class="mgu-top">${av(p.name, p.photo).replace('cm-av', 'cm-av big')}<div style="flex:1;min-width:0;"><div class="mgu-name">${esc(p.name)} ${d.verified ? '<i class="fa-solid fa-circle-check" style="color:#1d9bf0"></i>' : ''} ${p.banned ? '<span class="tag red">BANNED</span>' : ''}</div>
           <div class="mgu-sub">@<b>${esc(p.username)}</b> · ${p.isPrivate ? '🔒 Private' : '🌍 Public'} · ${p.online ? '🟢 online' : 'seen ' + ago(p.lastSeen)}</div><div class="mgu-sub">UID: <b>${esc(p.id)}</b> <button class="copy-btn" onclick="A.copyText('${esc(p.id)}')"><i class="fa-regular fa-copy"></i></button></div>${p.bio ? `<div class="mgu-sub">“${esc(p.bio)}”</div>` : ''}</div></div>
           <div class="us-stats"><div><b>${d.friends.length}/20</b><small>Friends</small></div><div><b>${d.incoming.filter(r => r.status === 'pending').length}</b><small>Incoming</small></div><div><b>${d.outgoing.filter(r => r.status === 'pending').length}</b><small>Sent</small></div><div><b>${d.blocked.length}</b><small>Blocked</small></div><div><b>${d.games.length}</b><small>Games</small></div></div>
-          <div class="btn-row" style="margin-top:12px;"><button class="btn ${p.banned ? 'btn-success' : 'btn-danger'}" style="flex:1;" onclick="A.cmBan('${esc(p.id)}',${!p.banned})"><i class="fa-solid ${p.banned ? 'fa-unlock' : 'fa-ban'}"></i> ${p.banned ? 'Unban from chat' : 'Ban from chat'}</button><button class="btn btn-outline" style="flex:1;" onclick="A.moneyFromChat('${esc(p.id)}')"><i class="fa-solid fa-id-card"></i> App record</button></div></div>
+          <div class="btn-row" style="margin-top:12px;"><button class="btn ${d.verified ? 'btn-outline' : 'btn-primary'}" style="flex:1;" onclick="A.cmTick('${esc(p.id)}',${!d.verified},true)"><i class="fa-solid fa-circle-check" style="color:#1d9bf0"></i> ${d.verified ? 'Remove blue tick' : 'Give blue tick'}</button></div>
+          <div class="btn-row" style="margin-top:8px;"><button class="btn ${p.banned ? 'btn-success' : 'btn-danger'}" style="flex:1;" onclick="A.cmBan('${esc(p.id)}',${!p.banned})"><i class="fa-solid ${p.banned ? 'fa-unlock' : 'fa-ban'}"></i> ${p.banned ? 'Unban from chat' : 'Ban from chat'}</button><button class="btn btn-outline" style="flex:1;" onclick="A.moneyFromChat('${esc(p.id)}')"><i class="fa-solid fa-id-card"></i> App record</button></div></div>
         ${sec('<i class="fa-solid fa-comments"></i> Friend chats', d.chats.length, d.chats.map(c => `<div class="cm-row click" onclick="A.cmMsgs('dm','${esc(c.id)}','${esc(p.name)} ↔ ${esc(c.with ? c.with.name : '?')}')">${av(c.with && c.with.name, c.with && c.with.photo)}<div class="mg-rt"><b>${esc(c.with ? c.with.name : '?')}</b><small>${esc(c.lastMsg || 'no messages')} · ${ago(c.lastAt)}</small></div><i class="fa-solid fa-chevron-right" style="color:var(--sub)"></i></div>`).join(''), true)}
         ${sec('<i class="fa-solid fa-user-group"></i> Friends', d.friends.length, d.friends.map(person).join(''))}
         ${sec('<i class="fa-solid fa-gamepad"></i> Game history', d.games.length, d.games.map(g => g.error ? `<div class="muted">${esc(g.error)}</div>` : `<div class="us-row"><div><b>${esc(g.title || g.id)}</b><div class="lg-meta">${esc(g.code || '')} · ${esc(g.mode || '')} · ${esc(g.status || '')}${g.kills ? ' · ' + g.kills + ' kills' : ''}${g.rank ? ' · rank ' + esc(g.rank) : ''}</div></div><b class="${g.win > 0 ? 'pos' : ''}">${g.win > 0 ? '+₹' + g.win : '₹' + (g.fee || 0)}</b></div>`).join(''))}
