@@ -112,7 +112,7 @@ def user_detail(uid):
     reps = [_d(x) for x in c.collection("creports").where("against", "==", uid).limit(40).stream()] + [_d(x) for x in c.collection("creports").where("from", "==", uid).limit(40).stream()]
     return {"profile": prof, "friends": [_name(f, cache) | {"starred": f in (fr.get("starred") or []), "nick": (fr.get("nicks") or {}).get(f, "")} for f in (fr.get("list") or [])],
             "blocked": [_name(b, cache) for b in (bl.get("list") or [])], "incoming": inc, "outgoing": outg, "chats": chats, "groups": groups, "reports": reps,
-            "games": game_history(uid)}
+            "games": game_history(uid), "verified": is_verified(uid)}
 
 
 def messages(kind, cid, limit=250):
@@ -135,25 +135,80 @@ def soft_delete_message(path):
     C().document(path).set({"deleted": True, "text": "", "adminDeleted": True}, merge=True)
 
 
+def _dbs():
+    """Main DB + chat DB (same object when chat is not separate). Blue ticks are written to BOTH, so they survive
+    switching the chat to another (empty) Firebase project — just paste its key in FIREBASE_CREDENTIALS_B641 and press Sync."""
+    a = fb.get_db(); b = C()
+    return [a] if a is b else [a, b]
+
+
+def _stamp(ref, flag):
+    try:
+        if ref.get().exists: ref.set({"isVerified": bool(flag), "verifiedAt": dt.datetime.utcnow().isoformat() + "Z" if flag else None}, merge=True)
+    except Exception: pass
+
+
 def set_verified(uid, flag):
-    """Blue tick -> chat. Written ONLY by the Admin SDK: cconfig/verified {uids:[...]} (everyone reads it) + cprofiles flag when a profile exists."""
+    """Blue tick ON/OFF for one user. Writes cconfig/verified {uids:[...]} + cprofiles.verified in the main AND the chat database,
+    and users.isVerified in the main database. Needs only the Admin SDK key(s)."""
     from google.cloud import firestore as gfs
-    if not uid: return False
-    db = C()
-    db.collection("cconfig").document("verified").set({"uids": gfs.ArrayUnion([uid]) if flag else gfs.ArrayRemove([uid])}, merge=True)
-    ref = db.collection("cprofiles").document(uid)
-    if ref.get().exists: ref.set({"verified": bool(flag)}, merge=True)
+    uid = str(uid or "").strip()
+    if not uid: raise ValueError("UID missing")
+    errs = []
+    for db in _dbs():
+        try:
+            db.collection("cconfig").document("verified").set({"uids": gfs.ArrayUnion([uid]) if flag else gfs.ArrayRemove([uid])}, merge=True)
+            ref = db.collection("cprofiles").document(uid)
+            if ref.get().exists: ref.set({"verified": bool(flag)}, merge=True)
+        except Exception as e: errs.append(str(e)[:120])
+    _stamp(fb.get_db().collection("users").document(uid), flag)
+    if len(errs) == len(_dbs()): raise RuntimeError("chat DB write failed: " + errs[0])
     return True
 
 
 def sync_all_verified():
-    """One-time helper: rebuild cconfig/verified from every user with users.isVerified == True."""
+    """Rebuild the verified list in every database from users.isVerified == True (run after you change the chat project)."""
     uids = [d.id for d in fb.get_db().collection("users").where("isVerified", "==", True).stream()]
-    C().collection("cconfig").document("verified").set({"uids": uids}, merge=True)
-    for u in uids:
-        r = C().collection("cprofiles").document(u)
-        if r.get().exists: r.set({"verified": True}, merge=True)
+    for db in _dbs():
+        db.collection("cconfig").document("verified").set({"uids": uids})
+        for u in uids:
+            try:
+                r = db.collection("cprofiles").document(u)
+                if r.get().exists: r.set({"verified": True}, merge=True)
+            except Exception: pass
     return len(uids)
+
+
+def resolve_uid(q):
+    """username (chat) / playerId / UID -> uid"""
+    q = str(q or "").strip()
+    if not q: return None
+    ql = q.lower().lstrip("@")
+    s = C().collection("cusernames").document(ql).get()
+    if s.exists and (s.to_dict() or {}).get("uid"): return s.to_dict()["uid"]
+    if fb.get_db().collection("users").document(q).get().exists: return q
+    for d in fb.get_db().collection("users").where("playerId", "==", q).limit(1).stream(): return d.id
+    for d in fb.get_db().collection("users").where("playerId", "==", q.upper()).limit(1).stream(): return d.id
+    return None
+
+
+def verified_list():
+    uids = {d.id for d in fb.get_db().collection("users").where("isVerified", "==", True).stream()}
+    try: uids |= set((C().collection("cconfig").document("verified").get().to_dict() or {}).get("uids", []))
+    except Exception: pass
+    out = []
+    for u in sorted(uids):
+        m = fb.get_db().collection("users").document(u).get().to_dict() or {}
+        p = C().collection("cprofiles").document(u).get().to_dict() or {}
+        out.append({"uid": u, "name": p.get("name") or m.get("appName") or "?", "username": p.get("username") or "", "photo": p.get("photo") or m.get("photoUrl") or ""})
+    return out
+
+
+def is_verified(uid):
+    try:
+        if (fb.get_db().collection("users").document(uid).get().to_dict() or {}).get("isVerified"): return True
+        return uid in ((C().collection("cconfig").document("verified").get().to_dict() or {}).get("uids", []))
+    except Exception: return False
 
 
 def set_banned(uid, banned, reason=""):
