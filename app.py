@@ -157,7 +157,7 @@ def chat_token():
         tok = (request.headers.get("Authorization") or "").replace("Bearer ", "").strip()
         info = fb.verify_main_token(tok)
         try:  # keep the chat profile's blue tick in sync with the main user record
-            if (fb.get_db().collection("users").document(info["uid"]).get().to_dict() or {}).get("isVerified"): chatadmin.set_verified(info["uid"], True)
+            chatadmin.set_verified(info["uid"], bool((fb.get_db().collection("users").document(info["uid"]).get().to_dict() or {}).get("isVerified")))
         except Exception: pass
         return Response(jsonify(ok=True, token=fb.chat_custom_token(info["uid"])).get_data(), mimetype="application/json", headers=hdr)
     except Exception as e:
@@ -178,6 +178,26 @@ def ca_verify():
     try:
         d = request.get_json(silent=True) or {}
         return ok(synced=chatadmin.set_verified(str(d.get("uid", "")), bool(d.get("verified"))))
+    except Exception as e: return bad(str(e), 500)
+
+
+@app.get("/api/chatadm/verified")
+@security.login_required
+def ca_verified_list():
+    try: return ok(users=chatadmin.verified_list())
+    except Exception as e: return bad(str(e), 500)
+
+
+@app.post("/api/chatadm/verify-by")
+@security.login_required
+def ca_verify_by():
+    """Give / remove the blue tick by chat username, playerId or UID."""
+    try:
+        d = request.get_json(silent=True) or {}
+        uid = chatadmin.resolve_uid(d.get("q"))
+        if not uid: return bad("User not found (use chat @username, Player ID or UID)", 404)
+        chatadmin.set_verified(uid, bool(d.get("verified", True)))
+        return ok(uid=uid)
     except Exception as e: return bad(str(e), 500)
 
 
@@ -306,7 +326,7 @@ for _rule, _methods, _fn in _LITE_ROUTES:
     app.add_url_rule(_rule, endpoint=f"lite_{_fn.__name__}_{_methods[0]}", view_func=_fn, methods=_methods)
 
 
-# ------------------------------------------------------------------ 4 Ball Match (game server)
+# ------------------------------------------------------------------ Coin Battle (game server)
 ballgame.register(app)
 
 
@@ -327,6 +347,13 @@ def boot():
         print("[warn] SESSION_SECRET set nahi — restart par sab admin logout ho jayenge", flush=True)
     jobs.start()
     keepalive.start()
+    # Blue ticks: rebuild the chat's verified list from the users database on every start (so old ticks never go missing)
+    def _tick_sync():
+        try:
+            time.sleep(6); n = chatadmin.sync_all_verified(); print(f"[chat] blue ticks synced: {n}", flush=True)
+        except Exception as e:
+            print("[chat] blue tick sync failed:", str(e)[:160], flush=True)
+    threading.Thread(target=_tick_sync, daemon=True).start()
 
 
 boot()
