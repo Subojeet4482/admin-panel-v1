@@ -11,7 +11,7 @@ Heavy kaam (backup, data center, data delete) **Service 3** mein, Fampay bot **S
 - Wallet approve par Fampay UTR match ab seedha Firestore pool se hota hai (`fampay_store.py`), bot thread ki zaroorat nahi
 - Month-end leaderboard reward job (halka, 15 min mein ek check)
 - Top strip: **Render status · UptimeRobot · Self revive** + header mein 3 panels ka switcher
-- **4 Ball Match game server** (`ballgame.py`): user app ka real-money game yahin chalta hai (rules, timers, bot, wallet payout, leaderboard). Admin tab **4 Ball Match**: entry amounts, cut %, bot on/off + strength, free practice, live games, house net. Match list mein har match par **slot + player names** dikhte hain.
+- **Coin Battle game server** (`ballgame.py`): user app ka real-money game yahin chalta hai (rules, timers, bot, wallet payout, leaderboard). Admin tab **Coin Battle**: entry amounts, cut %, bot on/off + strength, free practice, live games, house net. Match list mein har match par **slot + player names** dikhte hain.
 - Bots hamesha user ko **BOT** badge ke saath dikhte hain (kisi ko real player nahi dikhaye jate) aur fair hain.
 - Dashboard par **Payment Bot ↗** aur **Backup Center ↗** tiles
 
