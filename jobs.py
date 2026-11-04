@@ -57,7 +57,7 @@ def _loop():
 
 
 def _ball_loop():
-    """4 Ball Match housekeeping: resume games after a restart, settle abandoned games, drop old finished games."""
+    """Coin Battle housekeeping: resume games after a restart, settle abandoned games, drop old finished games."""
     import ballgame
     time.sleep(20)
     try: print(f"[ball] restored {ballgame.restore()} running game(s)", flush=True)
