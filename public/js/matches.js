@@ -1,5 +1,5 @@
 // Matches: list, create (BR / CS / Lone Wolf), room creds, results + team-split payouts, booya
-import { db, collection, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc, increment, onSnapshot } from './firebase.js';
+import { db, collection, doc, setDoc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, increment, onSnapshot, query, where, limit, runTransaction } from './firebase.js';
 
 let _timerID = null;
 
@@ -20,6 +20,18 @@ const TEAM_PRIZES = [['match_win', '🏆 Winning Team Prize']];
 const RANKS = { 1: ['🥇', '1st'], 2: ['🥈', '2nd'], 3: ['🥉', '3rd'] };
 const rankCount = (pm) => pm === 'top3' ? 3 : pm === 'top2' ? 2 : 1;
 const r2 = (n) => Math.floor((Number(n) || 0) * 100) / 100;
+
+const rupee = (n) => '₹' + (Math.round((Number(n) || 0) * 100) / 100);
+const slotsOf = (p) => Array.isArray(p.slots) && p.slots.length ? p.slots.map(Number) : (p.slot ? [Number(p.slot)] : []);
+const takenOf = (parts) => [...new Set(parts.flatMap(slotsOf))].sort((a, b) => a - b);
+// how much (and from which wallet) a participant paid — old entries without the split fall back to the match fee (refunded to deposit)
+const paidOf = (p, m) => {
+  if (p.payDep != null || p.payWd != null) return { dep: Number(p.payDep) || 0, wd: Number(p.payWd) || 0 };
+  const paid = p.paid != null ? Number(p.paid) : (Number(m.fee) || 0);
+  return { dep: paid, wd: 0 };
+};
+const depOf = (u) => u.depositBalance !== undefined ? Number(u.depositBalance) || 0 : Number(u.balance || 0);
+const live = (m) => (m.participants || []).filter(p => !p.refunded);   // players who can still win
 
 // Which team (1..n) does a slot belong to?
 function teamOfSlot(slot, m) {
@@ -64,6 +76,8 @@ Object.assign(window.A, {
         let arr = [];
         s.forEach(d => arr.push({ id: d.id, ...d.data() }));
         arr.sort((a, b) => new Date(b.startTime || 0) - new Date(a.startTime || 0));
+        arr.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));   // pinned matches stay on top
+        A._ML = {}; arr.forEach(m => A._ML[m.id] = m);
         if (!arr.length) { list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--sub);">No matches yet</p>'; return; }
         list.innerHTML = arr.map((m, i) => {
           const fmt = m.modeShort ? `${m.modeShort} • ${m.subMode}` : (m.teamMode || 'Match');
@@ -72,7 +86,7 @@ Object.assign(window.A, {
         <div class="card fade-up" style="animation-delay:${Math.min(i * 40, 300)}ms">
           <div class="card-top">
             <div>
-              <div class="card-title">${A.esc(m.title)}</div>
+              <div class="card-title">${m.pinned ? '📌 ' : ''}${A.esc(m.title)}</div>
               <div class="card-sub match-t" data-t="${m.startTime || ''}">⏳ Loading...</div>
               <div class="card-sub" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;">
                 <span class="code-pill">${A.esc(m.matchCode || m.id.slice(0, 8))}</span>
@@ -82,10 +96,15 @@ Object.assign(window.A, {
               <div class="card-sub" style="margin-top:6px;">${A.esc(m.map || 'Bermuda')} • ₹${m.fee} fee • ${m.joined || 0}/${m.total || 48} players</div>
               ${winners ? `<div class="card-sub" style="margin-top:6px;color:#15803d;font-weight:700;">${winners}</div>` : ''}
             </div>
-            <span class="badge ${m.status === 'completed' ? 'badge-done' : 'badge-active'}">${m.status || 'active'}</span>
+            <span class="badge ${m.status === 'completed' ? 'badge-done' : 'badge-active'}">${m.status === 'live' ? '🔴 LIVE' : (m.status || 'active')}</span>
           </div>
           ${A.rosterChips(m)}
           <button class="btn btn-outline btn-full" style="margin-bottom:10px;" onclick="A.showPlayers('${m.id}')"><i class="fa-solid fa-users"></i> Players &amp; Result (${m.joined || 0})</button>
+          <div class="btn-row" style="margin-bottom:10px;">
+            <button class="btn btn-outline" style="flex:1;" onclick="A.showEditModal('${m.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
+            <button class="btn btn-outline" style="flex:1;" onclick="A.togglePin('${m.id}')"><i class="fa-solid fa-thumbtack"></i> ${m.pinned ? 'Unpin' : 'Pin'}</button>
+            ${m.status === 'completed' ? '' : `<button class="btn ${m.status === 'live' ? 'btn-outline' : 'btn-primary'}" style="flex:1;" onclick="A.toggleStart('${m.id}')"><i class="fa-solid fa-play"></i> ${m.status === 'live' ? 'Undo Start' : 'Start'}</button>`}
+          </div>
           <div class="btn-row">
             <button class="btn btn-outline" style="flex:1;" onclick="A.showRoomModal('${m.id}')"><i class="fa-solid fa-key"></i> Room</button>
             <button class="btn btn-success" style="flex:1;" onclick="A.completeMatch('${m.id}')"><i class="fa-solid fa-flag-checkered"></i></button>
@@ -234,9 +253,10 @@ Object.assign(window.A, {
     A.toast('Deleted'); A.loadMatches();
   },
   showRoomModal(id) {
+    const cur = (A._ML && A._ML[id]) || {};
     document.getElementById('room-mid').value = id;
-    document.getElementById('room-id').value = '';
-    document.getElementById('room-pass').value = '';
+    document.getElementById('room-id').value = cur.roomId || '';
+    document.getElementById('room-pass').value = cur.roomPass || '';
     document.getElementById('m-room').classList.add('show');
   },
   async saveRoom() {
@@ -272,6 +292,7 @@ Object.assign(window.A, {
       document.getElementById('match-code-bar').innerHTML =
         `<span class="code-pill">${A.esc(m.matchCode || id.slice(0, 8))}</span><span class="tag">${A.esc(m.modeShort ? m.modeShort + ' • ' + m.subMode : (m.teamMode || 'Match'))}</span><span class="tag gold">${prizeModeLabel(m)}</span>${m.paid ? '<span class="tag green">PAID</span>' : ''}`;
       A.renderResultPanel(m);
+      A.renderPlayerTools(m);
 
       if (!players.length) { list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--sub);">No players joined yet</p>'; }
       else {
@@ -285,13 +306,15 @@ Object.assign(window.A, {
           html += `<div style="display:flex;align-items:center;gap:10px;background:#f8fafc;border-radius:10px;padding:10px;margin-bottom:6px;border:1px solid #f0f0f0;">
             <div class="slot-badge ${p.slot ? '' : 'none'}">${p.slot || '–'}</div>
             <div style="font-weight:700;font-size:0.85rem;">${A.esc(p.appName || 'User')}</div>
-            <div style="font-size:0.72rem;color:var(--sub);">${A.esc(p.gameName || '---')} • FF: ${A.esc(p.gameUid || '---')} • Slot #${p.slot || '-'}</div>
+            <div style="font-size:0.72rem;color:var(--sub);flex:1;">${A.esc(p.gameName || '---')} • FF: ${A.esc(p.gameUid || '---')} • Slot #${p.slot || '-'}${p.refunded ? ' <b style="color:#b45309;">• REFUNDED</b>' : ''}</div>
+            <button class="btn btn-outline" style="padding:6px 9px;font-size:0.7rem;" title="Change slot" onclick="A.changeSlot('${p.uid}')"><i class="fa-solid fa-shuffle"></i></button>
+            <button class="btn btn-danger" style="padding:6px 9px;font-size:0.7rem;" title="Kick + refund" onclick="A.kickPlayer('${p.uid}')"><i class="fa-solid fa-user-xmark"></i></button>
           </div>`;
         });
         list.innerHTML = html;
       }
       const bset = new Set((m.booyaPlayers || []).map(b => b.uid));
-      document.getElementById('booya-player-list').innerHTML = players.map(p => `
+      document.getElementById('booya-player-list').innerHTML = live(m).map(p => `
         <div style="display:flex;align-items:center;gap:10px;background:#fff;border-radius:10px;padding:8px 10px;margin-bottom:6px;border:1px solid #fecaca;">
           <input type="checkbox" id="by-${p.uid}" data-uid="${p.uid}" data-name="${A.esc(p.appName || 'User')}" ${bset.has(p.uid) ? 'checked' : ''} style="width:18px;height:18px;accent-color:#ef4444;">
           <label for="by-${p.uid}" style="font-weight:600;font-size:0.85rem;flex:1;">${A.esc(p.appName || 'User')}<br><span style="font-size:0.68rem;color:var(--sub);">${A.esc(p.gameUid || '---')}</span></label>
@@ -301,7 +324,7 @@ Object.assign(window.A, {
 
   // Options for a winner dropdown: players (solo) or whole teams (duo/squad/CS/LW)
   _winnerOptions(m) {
-    const players = m.participants || [];
+    const players = live(m);
     const size = m.teamSize || 1;
     if (size <= 1) return players.map(p => `<option value="u:${p.uid}">${A.esc(p.appName || 'User')} (${A.esc(p.gameUid || '---')})</option>`).join('');
     const teams = {}, loose = [];
@@ -312,7 +335,7 @@ Object.assign(window.A, {
     return h;
   },
   _resolveWinner(m, val) {
-    const players = m.participants || [];
+    const players = live(m);
     if (!val) return null;
     if (val.startsWith('u:')) { const p = players.find(x => x.uid === val.slice(2)); return p ? { label: p.appName || 'User', members: [p] } : null; }
     const t = +val.slice(2);
@@ -322,7 +345,7 @@ Object.assign(window.A, {
 
   renderResultPanel(m) {
     const box = document.getElementById('result-panel');
-    const players = m.participants || [];
+    const players = live(m);
     const pm = m.prizeMode || (m.matchType === 'per_kill' ? 'per_kill' : 'match_win');
     const prizeTimeRow = `
       <div class="lbl" style="margin-top:6px;">Prize Payout Time (shown to players)</div>
@@ -490,5 +513,284 @@ Object.assign(window.A, {
       });
       A.toast('Kill rewards credited!'); A.closeModal('m-players'); A.loadMatches();
     } catch (e) { A.toast('Error: ' + e.message, 'err'); }
-  }
+  },
+
+  /* ================= NEW: pin / start / edit / kick / refund / slots / add player ================= */
+  async togglePin(id) {
+    const m = (A._ML && A._ML[id]) || {};
+    await updateDoc(doc(db, 'matches', id), { pinned: !m.pinned, pinnedAt: m.pinned ? 0 : Date.now() });
+    A.toast(m.pinned ? 'Unpinned' : 'Pinned on top');
+  },
+  async toggleStart(id) {
+    const m = (A._ML && A._ML[id]) || {};
+    if (m.status === 'live') {
+      if (!confirm('Undo start? Room ID & password will be visible to players again.')) return;
+      await updateDoc(doc(db, 'matches', id), { status: 'upcoming', startedAt: 0 });
+      return A.toast('Back to upcoming');
+    }
+    if (!confirm('Start this match? Players will see "Game Started" instead of Room ID & password, and nobody can join any more.')) return;
+    await updateDoc(doc(db, 'matches', id), { status: 'live', startedAt: Date.now() });
+    A.toast('Match started — players see "Game Started"');
+  },
+
+  showEditModal(id) {
+    const m = (A._ML && A._ML[id]) || null;
+    if (!m) return A.toast('Match not found', 'err');
+    A._E = m;
+    const pm = m.prizeMode || (m.matchType === 'per_kill' ? 'per_kill' : 'match_win');
+    const pr = m.prizes || {};
+    const inp = (i, lbl, val) => `<div style="flex:1;min-width:110px;"><div class="lbl">${lbl}</div><input class="inp" id="${i}" type="number" min="0" value="${val || ''}"></div>`;
+    let pf = '';
+    if (m.paid) pf = '<div class="res-note">Prize already paid — prize amounts are locked.</div>';
+    else if (pm === 'per_kill') pf = inp('e-p-kill', 'Prize per Kill ₹', Number(pr[1] || m.prize) || '');
+    else { const n = rankCount(pm); for (let i = 1; i <= n; i++) pf += inp('e-p' + i, ['', '🥇 1st', '🥈 2nd', '🥉 3rd'][i] + ' Prize ₹', Number(pr[i] || (i === 1 ? m.prize : 0)) || ''); }
+    const maps = ['Bermuda', 'Bermuda Remastered', 'Purgatory', 'Kalahari', 'Alpine', 'NexTerra', 'Solara'];
+    if (m.map && !maps.includes(m.map)) maps.push(m.map);
+    const fixedSlots = m.mode === 'CS' || m.mode === 'LW';
+    let box = document.getElementById('m-edit');
+    if (!box) { box = document.createElement('div'); box.className = 'overlay'; box.id = 'm-edit'; document.body.appendChild(box); }
+    box.innerHTML = `<div class="sheet">
+      <div class="sheet-title"><i class="fa-solid fa-pen"></i> Edit Match</div>
+      <div class="res-note">Mode / format (${A.esc(m.teamMode || m.modeLabel || '')}) cannot be changed — create a new match for that.</div>
+      <div class="lbl">Match Name</div><input class="inp" id="e-title" value="${A.esc(m.title || '')}">
+      <div class="lbl">Map</div><select class="inp" id="e-map" style="background:#fff;">${maps.map(x => `<option ${x === (m.map || 'Bermuda') ? 'selected' : ''}>${A.esc(x)}</option>`).join('')}</select>
+      <div class="lbl">Start Date &amp; Time</div><input class="inp" id="e-time" type="datetime-local" step="1" value="${A.esc(m.startTime || '')}" style="background:#fff;">
+      <div style="display:flex;gap:12px;">
+        <div style="flex:1;"><div class="lbl">Entry Fee ₹</div><input class="inp" id="e-fee" type="number" min="0" value="${Number(m.fee) || 0}"></div>
+        <div style="flex:1;"><div class="lbl">Total Slots</div><input class="inp" id="e-total" type="number" min="1" max="48" value="${m.total || 48}" ${fixedSlots ? 'readonly style="opacity:.6"' : ''}></div>
+      </div>
+      <div class="lbl">Prize</div><div style="display:flex;gap:12px;flex-wrap:wrap;">${pf}</div>
+      <div class="lbl" style="margin-top:10px;">Prize Payout Time (optional)</div><input class="inp" id="e-ptime" type="datetime-local" value="${A.esc(m.prizeTime || '')}" style="background:#fff;">
+      <div style="display:flex;gap:12px;">
+        <div style="flex:1;"><div class="lbl">Room ID</div><input class="inp" id="e-room" value="${A.esc(m.roomId || '')}"></div>
+        <div style="flex:1;"><div class="lbl">Room Password</div><input class="inp" id="e-pass" value="${A.esc(m.roomPass || '')}"></div>
+      </div>
+      <div class="lbl">Banner Image URL</div><input class="inp" id="e-img" value="${A.esc(m.img || '')}" placeholder="https://...">
+      <div class="btn-row">
+        <button class="btn btn-outline" style="flex:1;" onclick="A.closeModal('m-edit')">Cancel</button>
+        <button class="btn btn-primary" style="flex:1;" onclick="A.saveEdit()"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+      </div></div>`;
+    box.classList.add('show');
+  },
+  async saveEdit() {
+    const m = A._E; if (!m) return;
+    const g = (i) => { const e = document.getElementById(i); return e ? Number(e.value) || 0 : 0; };
+    const v = (i) => (document.getElementById(i) || {}).value || '';
+    const title = v('e-title').trim();
+    if (!title) return A.toast('Enter a match name', 'err');
+    if (!v('e-time')) return A.toast('Select start date & time', 'err');
+    const parts = m.participants || [];
+    let total = m.total || 48;
+    if (!(m.mode === 'CS' || m.mode === 'LW')) {
+      total = Math.max(1, Math.min(48, g('e-total')));
+      const size = m.teamSize || 1;
+      if (size > 1) total -= total % size;
+      const maxSlot = Math.max(0, ...takenOf(parts));
+      if (total < Math.max(parts.length, maxSlot)) return A.toast(`Slots cannot be less than ${Math.max(parts.length, maxSlot)} (players / highest slot already taken)`, 'err');
+    }
+    const upd = { title, map: v('e-map'), startTime: v('e-time'), prizeTime: v('e-ptime'), total, roomId: v('e-room').trim(), roomPass: v('e-pass').trim(), img: v('e-img').trim() };
+    const fee = g('e-fee');
+    if (fee !== (Number(m.fee) || 0)) {
+      if (parts.length && !confirm(`Fee ₹${m.fee} → ₹${fee}.\n${parts.length} players already joined — they keep their old entry (refunds return what they paid). Continue?`)) return;
+      upd.fee = fee;
+      if (parts.length) upd.participants = parts.map(p => (p.payDep != null || p.payWd != null || p.paid != null) ? p : { ...p, paid: Number(m.fee) || 0 });
+    }
+    if (!m.paid) {
+      const pm = m.prizeMode || (m.matchType === 'per_kill' ? 'per_kill' : 'match_win');
+      if (pm === 'per_kill') {
+        const k = g('e-p-kill'); if (k <= 0) return A.toast('Enter prize per kill', 'err');
+        upd.prize = k; upd.prizes = {};
+      } else {
+        const n = rankCount(pm), tbl = {};
+        for (let i = 1; i <= n; i++) { const a = g('e-p' + i); if (a <= 0) return A.toast('Enter all prize amounts', 'err'); tbl[i] = a; }
+        upd.prizes = tbl; upd.prize = Object.values(tbl).reduce((a, b) => a + b, 0);
+      }
+    }
+    try {
+      await updateDoc(doc(db, 'matches', m.id), upd);
+      A.toast('Match updated!'); A.closeModal('m-edit');
+    } catch (e) { A.toast('Error: ' + e.message, 'err'); }
+  },
+
+  // ---- shared: write refund (wallet + notification + transaction) inside a transaction. `us` = user snapshot read BEFORE any write.
+  _refundWrites(tx, uid, us, m, p, why) {
+    const { dep, wd } = paidOf(p, m);
+    const amt = Math.round((dep + wd) * 100) / 100;
+    if (!us.exists() || amt <= 0) return 0;
+    const u = us.data(), now = Date.now(), date = new Date().toLocaleDateString();
+    const tref = doc(collection(db, 'users', uid, 'transactions'));
+    const orderNo = A._orderNum({ kind: 'refund' }, tref.id, now);
+    tx.update(doc(db, 'users', uid), {
+      depositBalance: Math.round((depOf(u) + dep) * 100) / 100,
+      withdrawBalance: Math.round((Number(u.withdrawBalance || 0) + wd) * 100) / 100
+    });
+    tx.set(tref, { title: `Refund: ${m.title}`, amount: `+₹${amt}`, type: 'deposit', status: 'success', kind: 'refund', orderNo, balanceType: dep >= wd ? 'deposit' : 'withdraw', by: 'admin', note: why, date, createdAt: now });
+    tx.set(doc(collection(db, 'users', uid, 'notifications')), { title: `Entry refunded: ₹${amt}`, message: `${m.title} — ${why}. ₹${amt} returned to your wallet (Order ${orderNo}).`, date, timestamp: new Date() });
+    return amt;
+  },
+
+  // Kick a player out of the match and give the entry fee back
+  async kickPlayer(uid) {
+    const mid = document.getElementById('players-mid').value;
+    const m0 = A._M || {}, p0 = (m0.participants || []).find(x => x.uid === uid) || {};
+    const back = paidOf(p0, m0);
+    if (!confirm(`Kick ${p0.appName || 'this player'} from the match?\nTheir entry ₹${back.dep + back.wd} will be refunded.`)) return;
+    try {
+      let amt = 0;
+      await runTransaction(db, async (tx) => {
+        const mref = doc(db, 'matches', mid), ms = await tx.get(mref), us = await tx.get(doc(db, 'users', uid));
+        if (!ms.exists()) throw new Error('Match not found');
+        const m = { id: mid, ...ms.data() };
+        if (m.paid) throw new Error('Prizes already paid — cannot kick now');
+        const parts = m.participants || [], p = parts.find(x => x.uid === uid);
+        if (!p) throw new Error('Player is not in this match');
+        const left = parts.filter(x => x.uid !== uid);
+        amt = p.refunded ? 0 : A._refundWrites(tx, uid, us, m, p, 'removed from match by admin');
+        tx.update(mref, { participants: left, takenSlots: takenOf(left), joined: left.length });
+        if (us.exists()) {
+          const u = us.data();
+          tx.update(doc(db, 'users', uid), { joined_matches: (u.joined_matches || []).filter(i => i !== mid), matchesPlayed: Math.max(0, (Number(u.matchesPlayed) || 0) - 1) });
+        }
+      });
+      A.toast(`Kicked${amt ? ' + refunded ' + rupee(amt) : ''}`);
+      A.showPlayers(mid);
+    } catch (e) { A.toast('Error: ' + e.message, 'err'); }
+  },
+
+  // Refund players who did not come into the game (they stay in the list, marked REFUNDED, and cannot win)
+  async refundNoShow() {
+    const mid = document.getElementById('players-mid').value;
+    const uids = Array.from(document.querySelectorAll('#ns-list input[type=checkbox]:checked')).map(c => c.dataset.uid);
+    if (!uids.length) return A.toast('Tick the players who did not join the game', 'err');
+    if (!confirm(`Refund entry fee to ${uids.length} player(s) who did not play?`)) return;
+    try {
+      let total = 0;
+      await runTransaction(db, async (tx) => {
+        const mref = doc(db, 'matches', mid), ms = await tx.get(mref);
+        if (!ms.exists()) throw new Error('Match not found');
+        const m = { id: mid, ...ms.data() };
+        const snaps = {};
+        for (const u of uids) snaps[u] = await tx.get(doc(db, 'users', u));
+        const now = Date.now();
+        const parts = (m.participants || []).map(p => {
+          if (!uids.includes(p.uid)) return p;
+          if (p.refunded) return p;
+          if (Number(p.winAmount) > 0) throw new Error(`${p.appName || 'Player'} already got a prize`);
+          const a = A._refundWrites(tx, p.uid, snaps[p.uid], m, p, 'you did not play in the game');
+          total += a;
+          return { ...p, refunded: true, refundAmount: a, refundedAt: now };
+        });
+        tx.update(mref, { participants: parts });
+      });
+      A.toast(`Refunded ${rupee(total)} to ${uids.length} player(s)`);
+      A.showPlayers(mid);
+    } catch (e) { A.toast('Error: ' + e.message, 'err'); }
+  },
+
+  // Move a player to another slot (if that slot is taken, the two players swap)
+  async changeSlot(uid) {
+    const mid = document.getElementById('players-mid').value;
+    const m0 = A._M || {}, p0 = (m0.participants || []).find(x => x.uid === uid) || {};
+    const v = prompt(`New slot number for ${p0.appName || 'player'} (1–${m0.total || 48}). If that slot is taken, both players swap.`, p0.slot || '');
+    if (v === null) return;
+    const ns = parseInt(v, 10);
+    if (!ns || ns < 1 || ns > (m0.total || 48)) return A.toast('Invalid slot', 'err');
+    try {
+      await runTransaction(db, async (tx) => {
+        const mref = doc(db, 'matches', mid), ms = await tx.get(mref);
+        if (!ms.exists()) throw new Error('Match not found');
+        const m = ms.data(), parts = m.participants || [];
+        const me = parts.find(x => x.uid === uid); if (!me) throw new Error('Player not in match');
+        const other = parts.find(x => x.uid !== uid && slotsOf(x).includes(ns));
+        const oldSlot = me.slot || null;
+        const np = parts.map(x => {
+          if (x.uid === uid) return { ...x, slot: ns, slots: [ns] };
+          if (other && x.uid === other.uid) return oldSlot ? { ...x, slot: oldSlot, slots: [oldSlot] } : (() => { const { slot, slots, ...rest } = x; return rest; })();
+          return x;
+        });
+        tx.update(mref, { participants: np, takenSlots: takenOf(np) });
+      });
+      A.toast('Slot changed'); A.showPlayers(mid);
+    } catch (e) { A.toast('Error: ' + e.message, 'err'); }
+  },
+
+  // Add a player by hand (UID / app name / email). Optionally charge the entry fee from his wallet.
+  async addPlayer() {
+    const mid = document.getElementById('players-mid').value;
+    const q = (document.getElementById('ap-user').value || '').trim();
+    const slotV = parseInt(document.getElementById('ap-slot').value, 10) || 0;
+    const charge = document.getElementById('ap-charge').value === '1';
+    if (!q) return A.toast('Enter user UID / app name / email', 'err');
+    try {
+      let uid = '';
+      if (!/\s/.test(q) && (await getDoc(doc(db, 'users', q))).exists()) uid = q;
+      for (const f of ['appName', 'email']) {
+        if (uid) break;
+        const r = await getDocs(query(collection(db, 'users'), where(f, '==', q), limit(1)));
+        r.forEach(d => { uid = d.id; });
+      }
+      if (!uid) return A.toast('User not found', 'err');
+      let who = '';
+      await runTransaction(db, async (tx) => {
+        const mref = doc(db, 'matches', mid), uref = doc(db, 'users', uid);
+        const ms = await tx.get(mref), us = await tx.get(uref);
+        if (!ms.exists() || !us.exists()) throw new Error('Match / user not found');
+        const m = { id: mid, ...ms.data() }, u = us.data(), parts = m.participants || [];
+        if (m.paid || m.status === 'completed') throw new Error('Match already completed');
+        if (parts.some(x => x.uid === uid)) throw new Error('Player is already in this match');
+        if (parts.length >= (m.total || 48)) throw new Error('Match is full');
+        if (slotV) {
+          if (slotV < 1 || slotV > (m.total || 48)) throw new Error('Invalid slot');
+          if (takenOf(parts).includes(slotV)) throw new Error('Slot already taken');
+        }
+        const fee = Number(m.fee) || 0, dep = depOf(u), wd = Number(u.withdrawBalance || 0);
+        let payDep = 0, payWd = 0;
+        const now = Date.now();
+        const upd = { joined_matches: [...new Set([...(u.joined_matches || []), mid])], matchesPlayed: (Number(u.matchesPlayed) || 0) + 1 };
+        if (charge && fee > 0) {
+          if (dep + wd < fee) throw new Error('User has not enough balance');
+          payDep = Math.min(dep, fee); payWd = Math.round((fee - payDep) * 100) / 100;
+          upd.depositBalance = Math.round((dep - payDep) * 100) / 100; upd.withdrawBalance = Math.round((wd - payWd) * 100) / 100;
+          tx.set(doc(collection(db, 'users', uid, 'transactions')), { title: `Joined ${m.title}`, amount: `-₹${fee}`, type: 'game', status: 'success', date: new Date().toLocaleDateString(), timestamp: new Date(), createdAt: now });
+        }
+        tx.update(uref, upd);
+        const entry = { uid, appName: u.appName || 'User', gameName: u.gameName || '', gameUid: u.gameUid || '', payDep, payWd, addedByAdmin: true, ...(slotV ? { slot: slotV, slots: [slotV] } : {}) };
+        const np = [...parts, entry];
+        tx.update(mref, { participants: np, takenSlots: takenOf(np), joined: np.length });
+        who = u.appName || 'User';
+      });
+      A.toast(`${who} added${charge ? ' (fee charged)' : ' (free entry)'}`);
+      document.getElementById('ap-user').value = ''; document.getElementById('ap-slot').value = '';
+      A.showPlayers(mid);
+    } catch (e) { A.toast('Error: ' + e.message, 'err'); }
+  },
+
+  // "Add player" form + "no-show refund" list (inside the Players modal)
+  renderPlayerTools(m) {
+    const box = document.getElementById('players-tools'); if (!box) return;
+    const parts = m.participants || [];
+    const ns = parts.length ? parts.map(p => `
+      <label style="display:flex;align-items:center;gap:10px;background:#fff;border-radius:10px;padding:8px 10px;margin-bottom:6px;border:1px solid #fde68a;${p.refunded ? 'opacity:.55;' : ''}">
+        <input type="checkbox" data-uid="${p.uid}" ${p.refunded ? 'disabled' : ''} style="width:18px;height:18px;accent-color:#d97706;">
+        <span style="flex:1;font-weight:600;font-size:0.82rem;">${A.esc(p.appName || 'User')}<br><span style="font-size:0.68rem;color:var(--sub);">${A.esc(p.gameUid || '---')}${p.slot ? ' • Slot #' + p.slot : ''}</span></span>
+        <span style="font-size:0.72rem;font-weight:700;">${p.refunded ? 'Refunded ' + rupee(p.refundAmount) : rupee(paidOf(p, m).dep + paidOf(p, m).wd)}</span>
+      </label>`).join('') : '<p style="font-size:0.78rem;color:var(--sub);">No players</p>';
+    box.innerHTML = `
+      <div style="background:#fffbeb;border-radius:14px;padding:14px;margin-top:14px;border:1px solid #fde68a;">
+        <div style="font-weight:800;font-size:0.88rem;color:#b45309;margin-bottom:6px;">↩ Refund — players who did not join the game</div>
+        <div style="font-size:0.72rem;color:var(--sub);margin-bottom:10px;">Tick the players who never came in. Their entry fee goes back to the wallet it came from. They stay in the list as REFUNDED and cannot win.</div>
+        <div id="ns-list">${ns}</div>
+        <button class="btn btn-primary btn-full" style="margin-top:8px;" onclick="A.refundNoShow()"><i class="fa-solid fa-rotate-left"></i> Refund Selected</button>
+      </div>
+      ${m.paid ? '' : `<div style="background:#eff6ff;border-radius:14px;padding:14px;margin-top:14px;border:1px solid #bfdbfe;">
+        <div style="font-weight:800;font-size:0.88rem;color:#1d4ed8;margin-bottom:8px;">➕ Add Player</div>
+        <input class="inp" id="ap-user" placeholder="User UID / app name / email">
+        <div style="display:flex;gap:10px;">
+          <input class="inp" id="ap-slot" type="number" min="1" placeholder="Slot (optional)" style="flex:1;">
+          <select class="inp" id="ap-charge" style="flex:1;background:#fff;"><option value="0">Free entry</option><option value="1">Charge entry fee</option></select>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="A.addPlayer()"><i class="fa-solid fa-user-plus"></i> Add to Match</button>
+      </div>`}`;
+  },
+
 });
