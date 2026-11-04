@@ -1,4 +1,4 @@
-// 4 Ball Match — admin control (settings, totals, recent games). Server: /api/ball/admin/*
+// Coin Battle — admin control (settings, totals, recent games). Server: /api/ball/admin/*
 const $ = (id) => document.getElementById(id);
 const esc = A.esc || ((s) => String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])));
 const inr = (n) => '₹' + (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -20,7 +20,7 @@ Object.assign(A, {
     const n = (id) => parseInt($(id).value, 10);
     try {
       await A.api('/api/ball/admin/config', { body: { enabled: $('bl-enabled').checked, botsEnabled: $('bl-bots').checked, entries: $('bl-entries').value.split(',').map(x => parseInt(x, 10)).filter(x => x > 0), cutPct: n('bl-cut'), practicePerDay: n('bl-prac'), botAfterFails: n('bl-fails'), searchSec: n('bl-search'), turnSec: n('bl-turn'), maxAuto: n('bl-auto'), botDepth: n('bl-depth'), botMs: n('bl-ms') } });
-      A.toast('4 Ball settings saved ✓'); A.ballLoad();
+      A.toast('Coin Battle settings saved ✓'); A.ballLoad();
     } catch (e) { A.fail(e); }
   }
 });
