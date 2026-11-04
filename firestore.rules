@@ -1,0 +1,694 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================== HELPERS ==============================
+    function signedIn() { return request.auth != null; }
+
+    // ADMIN: admin.html logs in with this same email.
+    // Stronger: instead of the email check, use  request.auth.uid == 'YOUR_ADMIN_UID_HERE'
+    function isAdmin() {
+      return signedIn() && (request.auth.token.admin == true || request.auth.token.email == 'chandanamandal4482@gmail.com');
+    }
+
+    function isMe(u) { return signedIn() && request.auth.uid == u; }
+
+    function userPath(u)   { return /databases/$(database)/documents/users/$(u); }
+    function depReqPath(u) { return /databases/$(database)/documents/deposit_requests/$(u); }
+    function fampayPath(u) { return /databases/$(database)/documents/fampay_deposits/$(u); }
+    function giftPath(h)   { return /databases/$(database)/documents/gift_codes/$(h); }
+    function giftRedPath(h, u) { return /databases/$(database)/documents/gift_codes/$(h)/redeems/$(u); }
+    function triesPath(u)  { return /databases/$(database)/documents/gift_tries/$(u); }
+    function usedPath(p)   { return /databases/$(database)/documents/fampay_used/$(p); }
+    function groupPath(g)  { return /databases/$(database)/documents/groups/$(g); }
+
+    // Total wallet = deposit + withdraw (`balance` fallback for older users)
+    function totalBal(d) {
+      return d.get('depositBalance', d.get('balance', 0)) + d.get('withdrawBalance', 0);
+    }
+
+    // Permanently banned users cannot do money / join actions
+    function notBanned() {
+      let u = get(userPath(request.auth.uid)).data;
+      return !(u.get('isBanned', false) == true && u.get('bannedUntil', 'permanent') == 'permanent');
+    }
+
+    // Chat ban (from the admin's Ban user button): chatBannedUntil = 0 (permanent) or millis
+    function chatOk() {
+      let u = get(userPath(request.auth.uid)).data;
+      return !(u.get('chatBanned', false) == true &&
+               (u.get('chatBannedUntil', 0) == 0 || u.get('chatBannedUntil', 0) > request.time.toMillis()));
+    }
+
+
+    // ================================ USERS ================================
+    match /users/{userId} {
+
+      // Leaderboard, chat search, profile, playerId lookup — all need a login
+      allow read: if signedIn();
+
+      // Register: own doc only, zero balance, no admin/ban/verify fields
+      allow create: if isMe(userId) && validNewUser(request.resource.data);
+
+      allow update: if isMe(userId) && ownerUpdateOk()
+                    || (signedIn() && !isMe(userId) && friendLinkOk());
+
+      // Delete: admin only (see the catch-all below)
+      allow delete: if false;
+
+      function validNewUser(d) {
+        return d.uid == request.auth.uid
+          && d.keys().hasOnly(['appName','email','phone','balance','depositBalance','withdrawBalance','uid',
+                               'playerId','joined_matches','score','kills','matchesPlayed','matchesWon',
+                               'totalEarned','gameName','gameUid','isUidVerified','photoUrl','nameChangesLeft'])
+          && d.get('depositBalance', 0) == 0 && d.get('withdrawBalance', 0) == 0 && d.get('balance', 0) == 0
+          && d.get('totalEarned', 0) == 0 && d.get('kills', 0) == 0 && d.get('matchesWon', 0) == 0
+          && d.get('score', 0) == 0 && d.get('matchesPlayed', 0) == 0
+          && d.get('isUidVerified', false) == false
+          && d.get('joined_matches', []).size() == 0;
+      }
+
+      // A user can change only these fields in their own doc (whitelist).
+      // Locked (admin only): isBanned, bannedUntil, isVerified, chatBanned*, playerId, uid, email,
+      // kills, matchesWon, totalEarned, score, totalWithdrawn, isAdmin/role, ...
+      function ownerUpdateOk() {
+        let d = request.resource.data;
+        let o = resource.data;
+        let ch = d.diff(o).affectedKeys();
+        return ch.hasOnly(['appName','name','username','bio','privacy','joinedAt',
+                           'gameName','gameUid','photoUrl','photoURL','coverURL',
+                           'paymentMethod','paymentName','nameChangesLeft','online','lastSeen',
+                           'friends','pinnedFriends','blockList','outgoingReq','muted','pinnedChats','archived',
+                           'joined_matches','matchesPlayed',
+                           'depositBalance','withdrawBalance','totalDeposited','lastDepositUtr',
+                           'phone','hasPassword','lastGiftHash'])
+          // FF UID cannot be changed once verified
+          && (!ch.hasAny(['gameUid']) || o.get('isUidVerified', false) == false)
+          // the name-change counter can only decrease
+          && (!ch.hasAny(['nameChangesLeft']) || d.nameChangesLeft < o.get('nameChangesLeft', 2))
+          && balancesOk(o, d);
+      }
+
+      // Withdraw balance can never increase (only the admin credits it).
+      // Deposit balance can only decrease, or increase through a verified UPI deposit.
+      function balancesOk(o, d) {
+        let wdBefore  = o.get('withdrawBalance', 0);
+        let wdAfter   = d.get('withdrawBalance', wdBefore);
+        let depBefore = o.get('depositBalance', o.get('balance', 0));
+        let depAfter  = d.get('depositBalance', depBefore);
+        return wdAfter >= 0 && depAfter >= 0
+          && (wdAfter <= wdBefore || validGiftCredit(o, d, wdAfter - wdBefore, 'withdraw'))
+          && (depAfter <= depBefore || validDepositCredit(o, d, depAfter - depBefore) || validGiftCredit(o, d, depAfter - depBefore, 'deposit'));
+      }
+
+      // Gift code: the credit must equal the amount stored in the (create-only) redeem record, and that record
+      // must be created in the SAME transaction => one account can redeem one code only once.
+      function validGiftCredit(o, d, delta, kind) {
+        let h = d.get('lastGiftHash', '');
+        return h is string && h != '' && h != o.get('lastGiftHash', '') && delta > 0
+          && get(giftPath(h)).data.balance == kind
+          && !exists(giftRedPath(h, request.auth.uid)) && existsAfter(giftRedPath(h, request.auth.uid))
+          && getAfter(giftRedPath(h, request.auth.uid)).data.amount == delta;
+      }
+
+      // UPI auto-verify: the payment must exist in fampay_deposits, the amount must match, and
+      // the request must be set to 'success' + the fampay doc deleted in the same transaction.
+      function validDepositCredit(o, d, delta) {
+        let utr = d.get('lastDepositUtr', '');
+        let rq = get(depReqPath(utr)).data;
+        let fp = get(fampayPath(utr)).data;
+        let pid = fp.get('payId', utr);
+        return utr is string && utr != '' && utr != o.get('lastDepositUtr', '')
+          && !exists(usedPath(pid)) && existsAfter(usedPath(pid))
+          && rq.uid == request.auth.uid
+          && rq.status in ['pending', 'processing']
+          && getAfter(depReqPath(utr)).data.status == 'success'
+          && !existsAfter(fampayPath(utr))
+          && math.abs(float(fp.amount) - delta) < 0.01
+          && math.abs(float(rq.amount) - delta) < 0.01
+          && math.abs((d.get('totalDeposited', 0) - o.get('totalDeposited', 0)) - delta) < 0.01;
+      }
+
+      // In another user's doc you may only add/remove YOUR OWN uid in friends / outgoingReq (friend accept/remove/block)
+      function friendLinkOk() {
+        let d = request.resource.data;
+        let o = resource.data;
+        let me = request.auth.uid;
+        return d.diff(o).affectedKeys().hasOnly(['friends', 'outgoingReq'])
+          && d.get('friends', []).toSet().difference(o.get('friends', []).toSet()).hasOnly([me])
+          && o.get('friends', []).toSet().difference(d.get('friends', []).toSet()).hasOnly([me])
+          && o.get('outgoingReq', []).toSet().difference(d.get('outgoingReq', []).toSet()).hasOnly([me])
+          && d.get('outgoingReq', []).toSet().difference(o.get('outgoingReq', []).toSet()).size() == 0;
+      }
+
+      // ---------------------- users/{uid}/transactions ----------------------
+      match /transactions/{trxId} {
+        allow read: if isMe(userId);
+
+        allow create: if isMe(userId) && validTrxCreate(userId, request.resource.data);
+
+        // Only the auto-verify UPI deposit entry (pending -> success/failed)
+        allow update: if isMe(userId) && validDepositTrxUpdate();
+
+        // A user cannot delete a pending entry (the admin must be able to see it)
+        allow delete: if isMe(userId) && resource.data.status != 'pending';
+
+        function validTrxCreate(uid, t) {
+          return (t.type == 'game' && t.status == 'success')
+              || (t.type == 'deposit' && t.status == 'pending' && t.get('method', '') in ['UPI', 'CRYPTO'])
+              || (t.type == 'withdraw' && t.status == 'pending' && validWithdraw(uid, t))
+              || (t.type == 'deposit' && t.status == 'success' && t.get('kind', '') == 'gift'
+                  && existsAfter(giftRedPath(t.giftHash, uid))
+                  && getAfter(giftRedPath(t.giftHash, uid)).data.amount == float(t.amount.split('₹')[1]));
+        }
+
+        // A withdraw request is created only if withdrawBalance is reduced by that amount in the same batch
+        function validWithdraw(uid, t) {
+          let amt = float(t.amount.split('₹')[1]);
+          let before = get(userPath(uid)).data.get('withdrawBalance', 0);
+          let after = getAfter(userPath(uid)).data.get('withdrawBalance', 0);
+          return notBanned() && amt >= 20 && (before - after) >= (amt - 0.01);
+        }
+
+        function validDepositTrxUpdate() {
+          let o = resource.data;
+          let d = request.resource.data;
+          return o.type == 'deposit' && o.get('method', '') == 'UPI' && o.status == 'pending'
+            && d.diff(o).affectedKeys().hasOnly(['status', 'title'])
+            && d.status in ['success', 'failed']
+            && (d.status == 'failed' || get(depReqPath(o.get('trxId', 'x'))).data.status == 'success');
+        }
+      }
+
+      // --------------------- users/{uid}/notifications ----------------------
+      match /notifications/{nid} {
+        allow read: if isMe(userId);
+        // the app itself creates only deposit-status notifications (not claim/cash ones)
+        allow create: if isMe(userId)
+          && request.resource.data.keys().hasOnly(['title','body','message','type','read','date','createdAt','timestamp']);
+        // claimCash / mark as read
+        allow update: if isMe(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claimed','claimedAt','read']);
+        allow delete: if isMe(userId);
+      }
+
+      // ---------------------- users/{uid}/matchHistory ----------------------
+      match /matchHistory/{hid} {
+        allow read: if isMe(userId);
+      }
+    }
+
+
+    // =============================== MATCHES ===============================
+    match /matches/{matchId} {
+      allow read: if true;                        // guests can also see the match list
+      allow create, delete: if false;             // admin only (catch-all)
+
+      allow update: if signedIn() && (joinOk(matchId) || slotOk(matchId));
+
+      // JOIN: joined +1, only your own entry added to participants (last), and the fee deducted from the wallet in the same batch
+      function joinOk(mid) {
+        let d = request.resource.data;
+        let o = resource.data;
+        let me = request.auth.uid;
+        let np = o.get('participants', []).size();
+        let ub = get(userPath(me)).data;
+        let ua = getAfter(userPath(me)).data;
+        return d.diff(o).affectedKeys().hasOnly(['joined', 'participants'])
+          && d.joined == o.get('joined', 0) + 1
+          && d.joined <= o.get('total', 48)
+          && d.participants.size() == np + 1
+          && d.participants[np].uid == me
+          && ua.get('joined_matches', []).hasAll([mid])
+          && !ub.get('joined_matches', []).hasAny([mid])
+          && (totalBal(ub) - totalBal(ua)) >= (float(o.get('fee', 0)) - 0.01)
+          && notBanned();
+      }
+
+      // SLOT CONFIRM: only a user who has joined, and the new slot must not already be taken
+      function slotOk(mid) {
+        let d = request.resource.data;
+        let o = resource.data;
+        let nt = o.get('takenSlots', []).size();
+        return d.diff(o).affectedKeys().hasOnly(['participants', 'takenSlots'])
+          && d.takenSlots.size() == nt + 1
+          && !(d.takenSlots[nt] in o.get('takenSlots', []))
+          && d.participants.size() == o.get('participants', []).size()
+          && get(userPath(request.auth.uid)).data.get('joined_matches', []).hasAll([mid]);
+      }
+    }
+
+
+    // ======================= PUBLIC CONFIG / CONTENT =======================
+    match /categories/{id} {
+      allow read: if true;
+    }
+
+    // Global broadcast notifications (sent by the admin) — init() reads them for guests too
+    match /notifications/{id} {
+      allow read: if true;
+    }
+
+    match /config/{docId} {
+      // banner = logo, banners, notice, support, UPI, QR, crypto, WhatsApp, Telegram
+      allow read: if docId in ['banner', 'rules', 'leaderboard']
+                  || (signedIn() && docId in ['chat_words', 'chat_settings', 'chat_banner']);
+    }
+
+
+    // ============================== PAYMENTS ===============================
+    // The user's UPI deposit request (doc id = UTR)
+    match /deposit_requests/{utr} {
+      // transaction.get() must also work on a missing doc (resource == null)
+      allow get: if signedIn() && (resource == null || resource.data.uid == request.auth.uid);
+      allow list: if signedIn() && resource.data.uid == request.auth.uid;
+
+      allow create: if signedIn() && notBanned()
+        && request.resource.data.keys().hasOnly(['utr','amount','uid','name','status','createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.utr == utr
+        && request.resource.data.status == 'pending'
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0 && request.resource.data.amount <= 100000;
+
+      allow update: if signedIn() && resource.data.uid == request.auth.uid && reqUpdateOk(utr);
+      allow delete: if false;
+
+      function reqUpdateOk(u) {
+        let o = resource.data;
+        let d = request.resource.data;
+        let ch = d.diff(o).affectedKeys();
+        return ch.hasOnly(['status','trxDocId','failedAt','verifiedAt','receivedAmount','claimed'])
+          && (!ch.hasAny(['status'])
+              || (o.status in ['pending','processing'] && d.status in ['processing','failed'])
+              || (o.status in ['pending','processing'] && d.status == 'success' && fampayConsumed(u, d)));
+      }
+
+      // 'success' only when the fampay payment exists, is deleted in this same transaction, and the amount matches
+      function fampayConsumed(u, d) {
+        let pid = get(fampayPath(u)).data.get('payId', u);
+        return exists(fampayPath(u)) && !existsAfter(fampayPath(u))
+          && !exists(usedPath(pid)) && existsAfter(usedPath(pid))
+          && math.abs(float(get(fampayPath(u)).data.amount) - float(d.receivedAmount)) < 0.01;
+      }
+    }
+
+    // Bank/UPI payment entry — written only by your server (Admin SDK).
+    // The client can only read its own request and delete it at the time of success.
+    // ONE payment = ONE marker (id = the payment's main id; its UTR and Transaction ID copies share it).
+    // Created exactly once, in the same transaction that credits the wallet => no double credit, ever,
+    // even when two users / two references (UTR vs Transaction ID) of the same payment race each other.
+    match /fampay_used/{pid} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['ref','uid','at'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.ref is string
+        && get(depReqPath(request.resource.data.ref)).data.uid == request.auth.uid
+        && exists(fampayPath(request.resource.data.ref))
+        && get(fampayPath(request.resource.data.ref)).data.get('payId', request.resource.data.ref) == pid;
+      allow list, update, delete: if false;
+    }
+
+    // Each payment is stored under its UTR *and* its Transaction ID (same payId) so the user can enter either one.
+    // ---------------------------- GIFT CODES ----------------------------
+    // doc id = SHA-256(code). Users can only GET (never list). Amount = pool[used] (pre-shuffled by admin).
+    match /gift_codes/{h} {
+      allow get: if signedIn();
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['used'])
+        && request.resource.data.used == resource.data.used + 1
+        && resource.data.status == 'active' && resource.data.used < resource.data.max
+        && resource.data.expiresAt > request.time.toMillis()
+        && !exists(giftRedPath(h, request.auth.uid)) && existsAfter(giftRedPath(h, request.auth.uid));
+      match /redeems/{uid} {
+        allow read: if isMe(uid);
+        allow create: if isMe(uid)
+          && request.resource.data.keys().hasOnly(['uid','amount','at','name','orderNo'])
+          && request.resource.data.uid == uid
+          && request.resource.data.amount == get(giftPath(h)).data.pool[get(giftPath(h)).data.used]
+          && (!exists(triesPath(uid)) || get(triesPath(uid)).data.fails < 5 || get(triesPath(uid)).data.resetAt < request.time.toMillis());
+      }
+    }
+    // wrong-try counter: 5 wrong tries => locked for 24h (resetAt)
+    match /gift_tries/{uid} {
+      allow get: if isMe(uid);
+      allow create: if isMe(uid) && request.resource.data.keys().hasOnly(['fails','resetAt']) && request.resource.data.fails == 1;
+      allow update: if isMe(uid) && request.resource.data.keys().hasOnly(['fails','resetAt'])
+        && ((request.resource.data.fails == resource.data.fails + 1 && resource.data.fails < 5)
+            || (resource.data.resetAt < request.time.toMillis() && request.resource.data.fails == 1));
+    }
+    // Leaderboard (Daily / Weekly / Monthly winnings) — written by the admin panel only
+    match /lb/{id} {
+      allow read: if signedIn();
+    }
+
+    match /fampay_deposits/{utr} {
+      allow get: if signedIn() && exists(depReqPath(utr))
+                 && get(depReqPath(utr)).data.uid == request.auth.uid;
+      allow delete: if signedIn() && get(depReqPath(utr)).data.uid == request.auth.uid
+                    && getAfter(depReqPath(utr)).data.status == 'success';
+      allow list, create, update: if false;
+    }
+
+
+    // #####################################################################################
+    // OPTIONAL — CHAT RULES FOR THE MAIN PROJECT
+    // Needed ONLY while the chat runs inside the main project (js/core/chat-firebase.js not configured).
+    // After the separate chat project (FIREBASE_CREDENTIALS_B641) is set up you can delete everything up to
+    // the line  "END OPTIONAL CHAT RULES".
+    // #####################################################################################
+
+    // =====================================================================
+    //  CHAT SYSTEM (collections start with "c": cprofiles, cfriends, crequests, cchats, cgroups, cworld ...)
+    //  Same block is used in the separate CHAT project (chat.firestore.rules) and as a fallback in the main project.
+    // =====================================================================
+    function cSigned() { return request.auth != null; }
+    function cMe(u) { return cSigned() && request.auth.uid == u; }
+    function cProf(u)  { return /databases/$(database)/documents/cprofiles/$(u); }
+    function cUser(n)  { return /databases/$(database)/documents/cusernames/$(n); }
+    function cFr(u)    { return /databases/$(database)/documents/cfriends/$(u); }
+    function cBl(u)    { return /databases/$(database)/documents/cblocks/$(u); }
+    function cReq(id)  { return /databases/$(database)/documents/crequests/$(id); }
+    function cChat(id) { return /databases/$(database)/documents/cchats/$(id); }
+    function cGrp(id)  { return /databases/$(database)/documents/cgroups/$(id); }
+    function cCfg(id)  { return /databases/$(database)/documents/cconfig/$(id); }
+    function cOk() { return cSigned() && !(exists(cProf(request.auth.uid)) && get(cProf(request.auth.uid)).data.get('banned', false)); }
+    function cFresh(ms) { return ms is number && ms > request.time.toMillis() - 120000 && ms < request.time.toMillis() + 120000; }
+    function cIsFriend(a, b) { return exists(cFr(a)) && (b in get(cFr(a)).data.list); }
+    function cBlocked(by, who) { return exists(cBl(by)) && (who in get(cBl(by)).data.list); }
+    // Direct message to a non-friend: allowed when the other person's profile is PUBLIC and nobody blocked anybody (World chat -> Message)
+    function cDmOpen(me, other) { return exists(cProf(other)) && get(cProf(other)).data.get('isPrivate', false) == false && !cBlocked(other, me) && !cBlocked(me, other); }
+    // an ACCEPTED friend request between a and b exists after this write
+    function cAccepted(a, b) {
+      return (existsAfter(cReq(a + '_' + b)) && getAfter(cReq(a + '_' + b)).data.status == 'accepted')
+          || (existsAfter(cReq(b + '_' + a)) && getAfter(cReq(b + '_' + a)).data.status == 'accepted');
+    }
+    // max 20 friends per user; a friend can only be added through an accepted request
+    function cFriendsOwn(u) {
+      let d = request.resource.data; let o = resource.data;
+      let added = d.list.toSet().difference(o.list.toSet());
+      return d.keys().hasOnly(['list','starred','nicks','lastAdded']) && d.list.size() <= 20
+        && (added.size() == 0 || (d.get('lastAdded', '') != '' && added.hasOnly([d.lastAdded]) && cAccepted(u, d.lastAdded)));
+    }
+    function cFriendsOther(u) {
+      let me = request.auth.uid; let d = request.resource.data; let o = resource.data;
+      let added = d.list.toSet().difference(o.list.toSet()); let removed = o.list.toSet().difference(d.list.toSet());
+      return d.diff(o).affectedKeys().hasOnly(['list']) && d.list.size() <= 20
+        && ((added.hasOnly([me]) && removed.size() == 0 && cAccepted(u, me)) || (removed.hasOnly([me]) && added.size() == 0));
+    }
+    function cReqCreate(id) {
+      let d = request.resource.data;
+      return cOk() && cMe(d.from) && id == d.from + '_' + d.to && d.from != d.to && d.status == 'pending'
+        && d.keys().hasOnly(['from','to','status','createdAt','fromName','fromPhoto','fromUsername'])
+        && !cIsFriend(d.from, d.to) && !cBlocked(d.to, d.from)
+        && (!exists(cFr(d.from)) || get(cFr(d.from)).data.list.size() < 20)
+        && (!exists(cFr(d.to)) || get(cFr(d.to)).data.list.size() < 20);
+    }
+    // messages: only the sender can edit / delete, and only within 10 minutes (600000 ms)
+    // verified (blue tick) users — flag is written ONLY by the admin server (users cannot set it: cprofiles update/create allow-lists exclude it)
+    function cVer() { return cSigned() && ((exists(/databases/$(database)/documents/cconfig/verified) && request.auth.uid in get(/databases/$(database)/documents/cconfig/verified).data.get('uids', [])) || (exists(cProf(request.auth.uid)) && get(cProf(request.auth.uid)).data.get('verified', false) == true)); }
+    // a verified user may edit/delete other people's messages in the public World room (marked editBy / delBy)
+    function cModEdit() {
+      return cVer() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text','edited','deleted','editBy','delBy'])
+        && request.resource.data.get('text','') is string && request.resource.data.get('text','').size() <= 500
+        && request.resource.data.get('editBy', request.auth.uid) == request.auth.uid && request.resource.data.get('delBy', request.auth.uid) == request.auth.uid;
+    }
+    function cMsgEdit() {
+      return cSigned() && resource.data.from == request.auth.uid
+        && request.time.toMillis() - resource.data.at < 600000
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text','edited','deleted']);
+    }
+
+    match /cprofiles/{u} {
+      allow read: if cSigned();
+      allow create: if cMe(u) && request.resource.data.uid == u
+        && request.resource.data.keys().hasOnly(['uid','username','name','photo','isPrivate','bio','createdAt','lastSeen','online'])
+        && request.resource.data.username is string && request.resource.data.username.size() >= 3 && request.resource.data.username.size() <= 20
+        && existsAfter(cUser(request.resource.data.username)) && getAfter(cUser(request.resource.data.username)).data.uid == u;
+      allow update: if cMe(u) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','photo','isPrivate','bio','lastSeen','online']);
+    }
+    match /cusernames/{n} {
+      allow get: if cSigned();
+      allow create: if cSigned() && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == request.auth.uid && n.matches('^[a-z0-9_]{3,20}$');
+    }
+    match /cfriends/{u} {
+      allow read: if cMe(u);
+      allow create: if cMe(u) && request.resource.data.keys().hasOnly(['list','starred','nicks','lastAdded']) && request.resource.data.list.size() == 0;
+      allow update: if (cMe(u) && cFriendsOwn(u)) || (cSigned() && request.auth.uid != u && cFriendsOther(u));
+    }
+    match /cblocks/{u} {
+      allow read: if cMe(u);
+      allow create, update: if cMe(u) && request.resource.data.keys().hasOnly(['list']) && request.resource.data.list.size() <= 200;
+    }
+    match /crequests/{id} {
+      allow read: if cSigned() && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+      allow create: if cReqCreate(id);
+      allow update: if cMe(resource.data.to) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','respondedAt'])
+        && request.resource.data.status in ['accepted','rejected'];
+      allow delete: if cSigned() && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+    }
+    match /cchats/{cid} {
+      allow read: if cSigned() && request.auth.uid in resource.data.members;
+      allow create: if cOk() && request.auth.uid in request.resource.data.members && request.resource.data.members.size() == 2
+        && request.resource.data.members[0] < request.resource.data.members[1]
+        && cid == request.resource.data.members[0] + '_' + request.resource.data.members[1]
+        && ((cIsFriend(request.resource.data.members[0], request.resource.data.members[1]) && cIsFriend(request.resource.data.members[1], request.resource.data.members[0]))
+            || cDmOpen(request.auth.uid, request.resource.data.members[0] == request.auth.uid ? request.resource.data.members[1] : request.resource.data.members[0]))
+        && request.resource.data.keys().hasOnly(['members','createdAt','lastMsg','lastAt','lastFrom','unread']);
+      allow update: if cSigned() && request.auth.uid in resource.data.members
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMsg','lastAt','lastFrom','unread']);
+      match /msgs/{mid} {
+        allow read: if cSigned() && request.auth.uid in get(cChat(cid)).data.members;
+        allow create: if cOk() && request.auth.uid in get(cChat(cid)).data.members && request.resource.data.from == request.auth.uid
+          && request.resource.data.keys().hasOnly(['from','text','at','rid','rn','rt','ru']) && cFresh(request.resource.data.at) && (!('rid' in request.resource.data) || (request.resource.data.rid is string && request.resource.data.rid.size() <= 40 && request.resource.data.get('rt','') is string && request.resource.data.get('rt','').size() <= 140 && request.resource.data.get('rn','') is string && request.resource.data.get('rn','').size() <= 40 && request.resource.data.get('ru','') is string))
+          && request.resource.data.text is string && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 1000
+          && !cBlocked(get(cChat(cid)).data.members[0] == request.auth.uid ? get(cChat(cid)).data.members[1] : get(cChat(cid)).data.members[0], request.auth.uid);
+        allow update: if cMsgEdit();
+        // messages live 24h: any participant may delete a message once it is older than 24h (cleanup)
+        allow delete: if cSigned() && request.auth.uid in get(cChat(cid)).data.members && resource.data.at is number && resource.data.at < request.time.toMillis() - 86400000;
+      }
+    }
+    match /cgroups/{gid} {
+      allow read: if cSigned() && request.auth.uid in resource.data.members;
+      allow create: if cOk() && request.resource.data.owner == request.auth.uid && request.auth.uid in request.resource.data.members
+        && request.resource.data.members.size() <= 30 && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2 && request.resource.data.name.size() <= 30
+        && request.resource.data.keys().hasOnly(['name','emoji','owner','members','createdAt','lastMsg','lastAt','lastFrom','unread']);
+      allow update: if cSigned() && request.auth.uid in resource.data.members && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMsg','lastAt','lastFrom','unread'])
+          || (resource.data.owner == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','emoji','members']) && request.resource.data.members.size() <= 30)
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+              && resource.data.members.toSet().difference(request.resource.data.members.toSet()).hasOnly([request.auth.uid])
+              && request.resource.data.members.toSet().difference(resource.data.members.toSet()).size() == 0));
+      allow delete: if cSigned() && resource.data.owner == request.auth.uid;
+      match /msgs/{mid} {
+        allow read: if cSigned() && request.auth.uid in get(cGrp(gid)).data.members;
+        allow create: if cOk() && request.auth.uid in get(cGrp(gid)).data.members && request.resource.data.from == request.auth.uid
+          && request.resource.data.keys().hasOnly(['from','text','at','rid','rn','rt','ru']) && cFresh(request.resource.data.at) && (!('rid' in request.resource.data) || (request.resource.data.rid is string && request.resource.data.rid.size() <= 40 && request.resource.data.get('rt','') is string && request.resource.data.get('rt','').size() <= 140 && request.resource.data.get('rn','') is string && request.resource.data.get('rn','').size() <= 40 && request.resource.data.get('ru','') is string))
+          && request.resource.data.text is string && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 1000;
+        allow update: if cMsgEdit();
+        // messages live 24h: any participant may delete a message once it is older than 24h (cleanup)
+        allow delete: if cSigned() && request.auth.uid in get(cGrp(gid)).data.members && resource.data.at is number && resource.data.at < request.time.toMillis() - 86400000;
+      }
+    }
+    match /cworld/{mid} {
+      allow read: if cSigned();
+      allow create: if cOk() && request.resource.data.from == request.auth.uid
+        && request.resource.data.keys().hasOnly(['from','name','photo','text','at','rid','rn','rt','ru']) && cFresh(request.resource.data.at) && (!('rid' in request.resource.data) || (request.resource.data.rid is string && request.resource.data.rid.size() <= 40 && request.resource.data.get('rt','') is string && request.resource.data.get('rt','').size() <= 140 && request.resource.data.get('rn','') is string && request.resource.data.get('rn','').size() <= 40 && request.resource.data.get('ru','') is string))
+        && request.resource.data.text is string && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 500
+        && !(exists(cCfg('world')) && get(cCfg('world')).data.get('locked', false));
+      allow update: if cMsgEdit() || cModEdit();
+        // messages live 24h: any participant may delete a message once it is older than 24h (cleanup)
+        allow delete: if cSigned() && resource.data.at is number && resource.data.at < request.time.toMillis() - 86400000;
+    }
+    match /cconfig/{id} { allow read: if cSigned(); }
+    match /creports/{id} {
+      allow create: if cSigned() && request.resource.data.from == request.auth.uid && request.resource.data.status == 'open'
+        && request.resource.data.keys().hasOnly(['from','against','chatId','kind','reason','createdAt','status','fromName','againstName']);
+    }
+    // ---------------------------- END OPTIONAL CHAT RULES ----------------------------
+
+    match /{path=**}/transactions/{id} {
+      allow read: if isAdmin();
+    }
+    match /{path=**}/messages/{id} {
+      allow read: if isAdmin();
+    }
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
+
+################################################################################
+#                           STORAGE RULES  (copy from here)
+#   (Storage -> Rules tab. For chat media + profile/cover photos.)
+################################################################################
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && (request.auth.token.admin == true || request.auth.token.email == 'chandanamandal4482@gmail.com'); }
+    // The file name is always  <uid>_<time>_<name>  (as produced by the code)
+    function mine(file) { return file.matches(request.auth.uid + '_.*'); }
+
+    // Profile + cover: image, max ~600 KB (the app compresses to 500 KB)
+    match /profile/{file} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && mine(file)
+        && request.resource.size < 600 * 1024 && request.resource.contentType.matches('image/.*');
+      allow delete: if signedIn() && mine(file);
+    }
+    match /cover/{file} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && mine(file)
+        && request.resource.size < 600 * 1024 && request.resource.contentType.matches('image/.*');
+      allow delete: if signedIn() && mine(file);
+    }
+
+    // Chat media (max 20 MB, same as the app's limit)
+    match /chat_images/{file} {
+      allow read: if signedIn();
+      allow create: if signedIn() && mine(file)
+        && request.resource.size < 20 * 1024 * 1024 && request.resource.contentType.matches('image/.*');
+      allow delete: if signedIn() && mine(file);
+    }
+    match /chat_videos/{file} {
+      allow read: if signedIn();
+      allow create: if signedIn() && mine(file)
+        && request.resource.size < 20 * 1024 * 1024 && request.resource.contentType.matches('video/.*');
+      allow delete: if signedIn() && mine(file);
+    }
+    match /voice_notes/{file} {
+      allow read: if signedIn();
+      allow create: if signedIn() && mine(file)
+        && request.resource.size < 20 * 1024 * 1024 && request.resource.contentType.matches('audio/.*');
+      allow delete: if signedIn() && mine(file);
+    }
+    match /documents/{file} {
+      allow read: if signedIn();
+      allow create: if signedIn() && mine(file) && request.resource.size < 20 * 1024 * 1024;
+      allow delete: if signedIn() && mine(file);
+    }
+
+    // Admin can do anything (cleanup / manual upload)
+    match /{allPaths=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
+k();
+        allow update: if signedIn() && isMember()
+          && ((resource.data.uid == request.auth.uid && request.resource.data.uid == resource.data.uid)
+              || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+              || (isStaff() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pinned', 'deleted', 'text'])));
+        allow delete: if signedIn() && (resource.data.uid == request.auth.uid || isStaff());
+      }
+    }
+
+    match /world_messages/{mid} {
+      allow read: if signedIn();
+      allow create: if signedIn() && chatOk()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type == 'text'
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000;
+      allow update: if signedIn()
+        && ((resource.data.uid == request.auth.uid && request.resource.data.uid == resource.data.uid)
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']));
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // Reports: a user can create; only the admin can read/resolve
+    match /reports/{rid} {
+      allow create: if signedIn()
+        && request.resource.data.reporter == request.auth.uid
+        && request.resource.data.status == 'open'
+        && request.resource.data.type in ['user', 'message'];
+    }
+
+
+    // =============================== ADMIN ================================
+    // admin.html: users (+ subcollections), matches, categories, notifications, config/*,
+    // deposit_requests, world_messages, groups, reports, leaderboard, backup/restore (all collections).
+    // collectionGroup('transactions') and collectionGroup('messages') are also open to the admin.
+    match /{path=**}/transactions/{id} {
+      allow read: if isAdmin();
+    }
+    match /{path=**}/messages/{id} {
+      allow read: if isAdmin();
+    }
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
+
+################################################################################
+#                           STORAGE RULES  (copy from here)
+#   (Storage -> Rules tab. For chat media + profile/cover photos.)
+################################################################################
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && (request.auth.token.admin == true || request.auth.token.email == 'chandanamandal4482@gmail.com'); }
+    // The file name is always  <uid>_<time>_<name>  (as produced by the code)
+    function mine(file) { return file.matches(request.auth.uid + '_.*'); }
+
+    // Profile + cover: image, max ~600 KB (the app compresses to 500 KB)
+    match /profile/{file} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && mine(file)
+        && request.resource.size < 600 * 1024 && request.resource.contentType.matches('image/.*');
+      allow delete: if signedIn() && mine(file);
+    }
+    match /cover/{file} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && mine(file)
+        && request.resource.size < 600 * 1024 && request.resource.contentType.matches('image/.*');
+      allow delete: if signedIn() && mine(file);
+    }
+
+    // Chat media (max 20 MB, same as the app's limit)
+    match /chat_images/{file} {
+      allow read: if signedIn();
+      allow create: if signedIn() && mine(file)
+        && request.resource.size < 20 * 1024 * 1024 && request.resource.contentType.matches('image/.*');
+      allow delete: if signedIn() && mine(file);
+    }
+    match /chat_videos/{file} {
+      allow read: if signedIn();
+      allow create: if signedIn() && mine(file)
+        && request.resource.size < 20 * 1024 * 1024 && request.resource.contentType.matches('video/.*');
+      allow delete: if signedIn() && mine(file);
+    }
+    match /voice_notes/{file} {
+      allow read: if signedIn();
+      allow create: if signedIn() && mine(file)
+        && request.resource.size < 20 * 1024 * 1024 && request.resource.contentType.matches('audio/.*');
+      allow delete: if signedIn() && mine(file);
+    }
+    match /documents/{file} {
+      allow read: if signedIn();
+      allow create: if signedIn() && mine(file) && request.resource.size < 20 * 1024 * 1024;
+      allow delete: if signedIn() && mine(file);
+    }
+
+    // Admin can do anything (cleanup / manual upload)
+    match /{allPaths=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // 4 Ball Match: games are written ONLY by the server (Admin SDK); players may read their own game live.
+    match /ball_games/{gid} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.uids;
+      allow write: if false;
+    }
+  }
+}
