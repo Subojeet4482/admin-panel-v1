@@ -407,8 +407,8 @@ service cloud.firestore {
     }
     // messages: only the sender can edit / delete, and only within 10 minutes (600000 ms)
     // verified (blue tick) users — flag is written ONLY by the admin server (users cannot set it: cprofiles update/create allow-lists exclude it)
-    function cVer() { return cSigned() && ((exists(/databases/$(database)/documents/cconfig/verified) && request.auth.uid in get(/databases/$(database)/documents/cconfig/verified).data.get('uids', [])) || (exists(cProf(request.auth.uid)) && get(cProf(request.auth.uid)).data.get('verified', false) == true)); }
-    // a verified user may edit/delete other people's messages in the public World room (marked editBy / delBy)
+    function cVer() { return cSigned() && ((exists(/databases/$(database)/documents/cconfig/verified) && request.auth.uid in get(/databases/$(database)/documents/cconfig/verified).data.get('uids', [])) || (exists(cProf(request.auth.uid)) && get(cProf(request.auth.uid)).data.get('verified', false) == true) || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isVerified', false) == true)); }
+    // a verified (blue tick) user may edit/delete ANY message in the World room and in every group / DM he belongs to (marked editBy / delBy)
     function cModEdit() {
       return cVer() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text','edited','deleted','editBy','delBy'])
         && request.resource.data.get('text','') is string && request.resource.data.get('text','').size() <= 500
@@ -464,7 +464,7 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['from','text','at','rid','rn','rt','ru']) && cFresh(request.resource.data.at) && (!('rid' in request.resource.data) || (request.resource.data.rid is string && request.resource.data.rid.size() <= 40 && request.resource.data.get('rt','') is string && request.resource.data.get('rt','').size() <= 140 && request.resource.data.get('rn','') is string && request.resource.data.get('rn','').size() <= 40 && request.resource.data.get('ru','') is string))
           && request.resource.data.text is string && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 1000
           && !cBlocked(get(cChat(cid)).data.members[0] == request.auth.uid ? get(cChat(cid)).data.members[1] : get(cChat(cid)).data.members[0], request.auth.uid);
-        allow update: if cMsgEdit();
+        allow update: if cMsgEdit() || (cModEdit() && request.auth.uid in get(cChat(cid)).data.members);
         // messages live 24h: any participant may delete a message once it is older than 24h (cleanup)
         allow delete: if cSigned() && request.auth.uid in get(cChat(cid)).data.members && resource.data.at is number && resource.data.at < request.time.toMillis() - 86400000;
       }
@@ -487,7 +487,7 @@ service cloud.firestore {
         allow create: if cOk() && request.auth.uid in get(cGrp(gid)).data.members && request.resource.data.from == request.auth.uid
           && request.resource.data.keys().hasOnly(['from','text','at','rid','rn','rt','ru']) && cFresh(request.resource.data.at) && (!('rid' in request.resource.data) || (request.resource.data.rid is string && request.resource.data.rid.size() <= 40 && request.resource.data.get('rt','') is string && request.resource.data.get('rt','').size() <= 140 && request.resource.data.get('rn','') is string && request.resource.data.get('rn','').size() <= 40 && request.resource.data.get('ru','') is string))
           && request.resource.data.text is string && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 1000;
-        allow update: if cMsgEdit();
+        allow update: if cMsgEdit() || (cModEdit() && request.auth.uid in get(cGrp(gid)).data.members);
         // messages live 24h: any participant may delete a message once it is older than 24h (cleanup)
         allow delete: if cSigned() && request.auth.uid in get(cGrp(gid)).data.members && resource.data.at is number && resource.data.at < request.time.toMillis() - 86400000;
       }
@@ -685,7 +685,7 @@ service firebase.storage {
       allow read, write: if isAdmin();
     }
 
-    // 4 Ball Match: games are written ONLY by the server (Admin SDK); players may read their own game live.
+    // Coin Battle: games are written ONLY by the server (Admin SDK); players may read their own game live.
     match /ball_games/{gid} {
       allow read: if request.auth != null && request.auth.uid in resource.data.uids;
       allow write: if false;
