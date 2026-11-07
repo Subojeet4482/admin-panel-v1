@@ -322,7 +322,7 @@ def register(app):
 
     @app.get("/api/bomb/admin/overview")
     @security.login_required
-    def a_overview():
+    def bomb_a_overview():
         db = fb.get_db(); tot = db.collection("bomb_totals").document("all").get().to_dict() or {}
         games = []
         for s in db.collection("bomb_games").order_by("createdAt", direction="DESCENDING").limit(40).stream():
@@ -334,7 +334,7 @@ def register(app):
 
     @app.post("/api/bomb/admin/config")
     @security.login_required
-    def a_config(): return jsonify(ok=True, cfg=save_cfg(request.get_json(silent=True) or {}))
+    def bomb_a_config(): return jsonify(ok=True, cfg=save_cfg(request.get_json(silent=True) or {}))
     return app
 
 def restore():
