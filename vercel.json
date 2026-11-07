@@ -1,0 +1,15 @@
+{
+  "cleanUrls": false,
+  "headers": [
+    { "source": "/", "headers": [ { "key": "Cache-Control", "value": "no-cache, must-revalidate" } ] },
+    { "source": "/index.html", "headers": [ { "key": "Cache-Control", "value": "no-cache, must-revalidate" } ] },
+    { "source": "/(js|css|pages|components)/(.*)\\.(js|css)", "headers": [ { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" } ] },
+    { "source": "/(pages|components)/(.*)\\.html", "headers": [ { "key": "Cache-Control", "value": "no-cache, must-revalidate" } ] },
+    { "source": "/(manifest\\.webmanifest|sitemap\\.xml|robots\\.txt)", "headers": [ { "key": "Cache-Control", "value": "no-cache, must-revalidate" } ] },
+    { "source": "/assets/(.*)", "headers": [ { "key": "Cache-Control", "value": "public, max-age=604800, stale-while-revalidate=86400" } ] },
+    { "source": "/sw.js", "headers": [ { "key": "Cache-Control", "value": "no-cache" }, { "key": "Service-Worker-Allowed", "value": "/" } ] }
+  ],
+  "rewrites": [
+    { "source": "/((?!assets/|components/|css/|js/|pages/|sw\\.js|manifest\\.webmanifest|.*\\..*).*)", "destination": "/index.html" }
+  ]
+}
