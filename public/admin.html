@@ -125,6 +125,10 @@
       <div class="menu-btn-icon" style="background:#e11d48;"><i class="fa-solid fa-bomb"></i></div>
       <div class="menu-btn-lbl">Bomb &amp; Gems</div>
     </div>
+    <div class="menu-btn" onclick="A.goTab('lbm')">
+      <div class="menu-btn-icon" style="background:#f59e0b;"><i class="fa-solid fa-ranking-star"></i></div>
+      <div class="menu-btn-lbl">Leaderboard</div>
+    </div>
     <div class="menu-btn" onclick="A.goTab('reports')" style="position:relative;">
       <div class="menu-btn-icon" style="background:#dc2626;"><i class="fa-solid fa-flag"></i></div>
       <div class="menu-btn-lbl">Reports</div>
@@ -365,23 +369,54 @@
     <div class="bomb-stats" id="bomb-stats"><span class="muted">Loading…</span></div>
     <div class="card"><div class="card-h">Game settings <span class="muted" style="font-weight:600">(live — no restart)</span></div>
       <label class="ls-switch2"><input type="checkbox" id="bm-enabled"><i></i><span>Game ON (users can play)</span></label>
-      <label class="ls-switch2" style="margin-top:8px"><input type="checkbox" id="bm-bots"><i></i><span>Bots allowed when no real player is found (always labelled BOT)</span></label>
+      <label class="ls-switch2" style="margin-top:8px"><input type="checkbox" id="bm-bots"><i></i><span>Bots allowed in FREE practice matches only (always labelled BOT). Cash matches never get a bot.</span></label>
       <div class="lbl" style="margin-top:12px">Entry amounts ₹ (comma separated)</div><input class="inp" id="bm-entries" placeholder="2,5,10">
       <div class="ball-grid">
         <div><div class="lbl">Platform cut %</div><input class="inp" id="bm-cut" type="number" min="0" max="50"></div>
         <div><div class="lbl">Free practice / day</div><input class="inp" id="bm-prac" type="number" min="0" max="50"></div>
         <div><div class="lbl">Bot joins after N failed searches</div><input class="inp" id="bm-fails" type="number" min="1" max="5"></div>
-        <div><div class="lbl">Search time (sec)</div><input class="inp" id="bm-search" type="number" min="4" max="40"></div>
+        <div><div class="lbl">Free match search time (sec)</div><input class="inp" id="bm-search" type="number" min="4" max="40"></div>
+        <div><div class="lbl">Cash match search time (sec) — real players only</div><input class="inp" id="bm-psearch" type="number" min="4" max="120"></div>
         <div><div class="lbl">Turn timer (sec)</div><input class="inp" id="bm-turn" type="number" min="6" max="60"></div>
         <div><div class="lbl">Missed turns before forfeit</div><input class="inp" id="bm-auto" type="number" min="0" max="10"></div>
         <div><div class="lbl">Min hidden bombs</div><input class="inp" id="bm-minb" type="number" min="1" max="24"></div>
         <div><div class="lbl">Max hidden bombs</div><input class="inp" id="bm-maxb" type="number" min="1" max="24"></div>
         <div><div class="lbl">Bot pick delay (ms)</div><input class="inp" id="bm-ms" type="number" min="300" max="3000"></div>
       </div>
-      <div class="muted" style="font-size:.72rem;margin:6px 0 10px">5×5 board, the SERVER hides min–max bombs at random each game. Whoever opens a bomb loses; winner gets 2 × entry minus the cut (10% → 1.8 × entry). Bots pick random boxes and are always labelled BOT.</div>
+      <div class="muted" style="font-size:.72rem;margin:6px 0 10px">5×5 board, the SERVER hides min–max bombs at random each game. Whoever opens a bomb loses; winner gets 2 × entry minus the cut (10% → 1.8 × entry). Bots appear only in free practice matches, pick random boxes and are always labelled BOT.</div>
       <button class="btn btn-primary btn-full" onclick="A.bombSave()"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
     </div>
     <div class="card"><div class="card-h">Recent games <button class="btn btn-outline" style="float:right;padding:4px 10px;font-size:.72rem" onclick="A.bombLoad()"><i class="fa-solid fa-rotate"></i></button></div><div id="bomb-games"></div></div>
+  </div>
+</div>
+
+<div id="tab-lbm" class="tab">
+  <div class="top-bar">
+    <h2 style="font-size:1.1rem;font-weight:800;"><i class="fa-solid fa-ranking-star" style="color:#f59e0b;"></i> Leaderboard</h2>
+    <button class="btn btn-outline" style="padding:6px 12px;font-size:0.78rem;" onclick="A.goTab('dash')"><i class="fa-solid fa-arrow-left"></i> Back</button>
+  </div>
+  <div class="page-pad" style="padding-top:14px;">
+    <div class="card">
+      <div class="card-h">Board <span class="muted" style="font-weight:600" id="lbm-key"></span></div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <button class="btn btn-outline" id="lbm-p-d" onclick="A.lbmPeriod('d')" style="flex:1">Today</button>
+        <button class="btn btn-outline" id="lbm-p-w" onclick="A.lbmPeriod('w')" style="flex:1">This week</button>
+        <button class="btn btn-outline" id="lbm-p-m" onclick="A.lbmPeriod('m')" style="flex:1">This month</button>
+      </div>
+      <div class="muted" style="font-size:.74rem;margin-bottom:10px">
+        <b>Remove</b> = deletes the person from the board shown (their next win adds them again).
+        <b>Hide</b> = test / admin account: removed from today, week &amp; month and <b>never shown again</b> (and never gets the monthly reward).
+        <b>Blue tick</b> = ON/OFF (shown with a pink-purple name in the leaderboard, chat, games and rosters).
+      </div>
+      <div id="lbm-list"><span class="muted">Loading…</span></div>
+    </div>
+    <div class="card"><div class="card-h">Hidden accounts <span class="muted" style="font-weight:600">(never on the leaderboard)</span></div>
+      <div id="lbm-hidden"><span class="muted">—</span></div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input class="inp" id="lbm-uid" placeholder="UID of a user to hide" style="margin:0;flex:1">
+        <button class="btn btn-primary" onclick="A.lbmHideInput()">Hide</button>
+      </div>
+    </div>
   </div>
 </div>
 

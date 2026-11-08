@@ -27,7 +27,8 @@ def monthly_reward():
     except Exception:
         return
     players = ((db.collection("lb").document("m-" + mk).get().to_dict() or {}).get("players") or {})
-    rank = sorted([(uid, p) for uid, p in players.items() if float(p.get("a") or 0) > 0], key=lambda x: -float(x[1].get("a") or 0))[:len(rewards)]
+    hidden = set(cfg.get("hidden") or [])          # accounts the admin hid from the leaderboard (tests / admins)
+    rank = sorted([(uid, p) for uid, p in players.items() if float(p.get("a") or 0) > 0 and uid not in hidden], key=lambda x: -float(x[1].get("a") or 0))[:len(rewards)]
     paid = []
     for i, (uid, p) in enumerate(rank):
         amt = rewards[i]; uref = db.collection("users").document(uid)

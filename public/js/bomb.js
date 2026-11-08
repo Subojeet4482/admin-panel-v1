@@ -2,7 +2,7 @@
 const $ = (id) => document.getElementById(id);
 const esc = A.esc || ((s) => String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])));
 const inr = (n) => '₹' + (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-const fill = (c) => { $('bm-enabled').checked = !!c.enabled; $('bm-bots').checked = !!c.botsEnabled; $('bm-entries').value = (c.entries || []).join(','); $('bm-cut').value = c.cutPct; $('bm-prac').value = c.practicePerDay; $('bm-fails').value = c.botAfterFails; $('bm-search').value = c.searchSec; $('bm-turn').value = c.turnSec; $('bm-auto').value = c.maxAuto; $('bm-minb').value = c.minBombs; $('bm-maxb').value = c.maxBombs; $('bm-ms').value = c.botMs; };
+const fill = (c) => { $('bm-enabled').checked = !!c.enabled; $('bm-bots').checked = !!c.botsEnabled; $('bm-entries').value = (c.entries || []).join(','); $('bm-cut').value = c.cutPct; $('bm-prac').value = c.practicePerDay; $('bm-fails').value = c.botAfterFails; $('bm-search').value = c.searchSec; $('bm-psearch').value = c.paidSearchSec; $('bm-turn').value = c.turnSec; $('bm-auto').value = c.maxAuto; $('bm-minb').value = c.minBombs; $('bm-maxb').value = c.maxBombs; $('bm-ms').value = c.botMs; };
 Object.assign(A, {
   async bombLoad() {
     try {
@@ -19,7 +19,7 @@ Object.assign(A, {
   async bombSave() {
     const n = (id) => parseInt($(id).value, 10);
     try {
-      await A.api('/api/bomb/admin/config', { body: { enabled: $('bm-enabled').checked, botsEnabled: $('bm-bots').checked, entries: $('bm-entries').value.split(',').map(x => parseInt(x, 10)).filter(x => x > 0), cutPct: n('bm-cut'), practicePerDay: n('bm-prac'), botAfterFails: n('bm-fails'), searchSec: n('bm-search'), turnSec: n('bm-turn'), maxAuto: n('bm-auto'), minBombs: n('bm-minb'), maxBombs: n('bm-maxb'), botMs: n('bm-ms') } });
+      await A.api('/api/bomb/admin/config', { body: { enabled: $('bm-enabled').checked, botsEnabled: $('bm-bots').checked, entries: $('bm-entries').value.split(',').map(x => parseInt(x, 10)).filter(x => x > 0), cutPct: n('bm-cut'), practicePerDay: n('bm-prac'), botAfterFails: n('bm-fails'), searchSec: n('bm-search'), paidSearchSec: n('bm-psearch'), turnSec: n('bm-turn'), maxAuto: n('bm-auto'), minBombs: n('bm-minb'), maxBombs: n('bm-maxb'), botMs: n('bm-ms') } });
       A.toast('Bomb & Gems settings saved ✓'); A.bombLoad();
     } catch (e) { A.fail(e); }
   }

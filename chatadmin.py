@@ -163,12 +163,17 @@ def set_verified(uid, flag):
         except Exception as e: errs.append(str(e)[:120])
     _stamp(fb.get_db().collection("users").document(uid), flag)
     if len(errs) == len(_dbs()): raise RuntimeError("chat DB write failed: " + errs[0])
+    try:    # the main app (leaderboard, rosters, games) reads the blue-tick list from config/verified in the MAIN database
+        fb.get_db().collection("config").document("verified").set({"uids": gfs.ArrayUnion([uid]) if flag else gfs.ArrayRemove([uid])}, merge=True)
+    except Exception as e: print("[verified] main config/verified:", e, flush=True)
     return True
 
 
 def sync_all_verified():
     """Rebuild the verified list in every database from users.isVerified == True (run after you change the chat project)."""
     uids = [d.id for d in fb.get_db().collection("users").where("isVerified", "==", True).stream()]
+    try: fb.get_db().collection("config").document("verified").set({"uids": uids})
+    except Exception as e: print("[verified] main config sync:", e, flush=True)
     for db in _dbs():
         db.collection("cconfig").document("verified").set({"uids": uids})
         for u in uids:

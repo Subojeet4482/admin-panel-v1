@@ -4,7 +4,7 @@
   gem = safe (opponent's turn) · bomb = the opener LOSES.
 Why on the server: bomb positions are generated here and kept in memory + `bomb_secret/{gid}` (no client can read it).
 The phone only receives {box, gem|bomb} AFTER a box is opened; the full bomb map is revealed only when the game is over.
-Bots are ALWAYS labelled BOT and open random boxes (they know nothing the human does not know).
+Bots play ONLY free practice matches (cash matches are real players only), are ALWAYS labelled BOT and open random boxes.
 Firestore: config/bomb · bomb_games/{gid} (players may read their own) · bomb_secret/{gid} (server only) · bomb_stats/{uid} · bomb_totals/all
 """
 import os, time, random, threading, uuid
@@ -16,7 +16,7 @@ from ballgame import NOW, LOCK as _L, debit, credit, lb_add, player_info, bot_in
 
 N = 25
 DEFAULT_CFG = {"enabled": True, "entries": [2, 5, 10], "cutPct": 10, "practicePerDay": 3, "botsEnabled": True, "botAfterFails": 2,
-               "searchSec": 12, "turnSec": 15, "maxAuto": 3, "botMs": 900, "maxStake": 100, "minBombs": 1, "maxBombs": 10}
+               "searchSec": 12, "paidSearchSec": 25, "turnSec": 15, "maxAuto": 3, "botMs": 900, "maxStake": 100, "minBombs": 1, "maxBombs": 10}
 INTRO_MS = 11000      # extra time before the very first turn (reveal screen + coin toss + bomb roll on the phone)
 
 _cfg = {"t": 0, "v": dict(DEFAULT_CFG)}
@@ -36,7 +36,7 @@ def save_cfg(patch):
     v = dict(DEFAULT_CFG); v.update(cfg(True))
     ent = patch.get("entries")
     if ent is not None: v["entries"] = sorted({int(x) for x in ent if 1 <= int(x) <= int(v.get("maxStake", 100))})[:6] or [2, 5, 10]
-    for k, lo, hi in (("cutPct", 0, 50), ("practicePerDay", 0, 50), ("botAfterFails", 1, 5), ("searchSec", 4, 40), ("turnSec", 6, 60), ("maxAuto", 0, 10), ("botMs", 300, 3000), ("maxStake", 1, 1000), ("minBombs", 1, 24), ("maxBombs", 1, 24)):
+    for k, lo, hi in (("cutPct", 0, 50), ("practicePerDay", 0, 50), ("botAfterFails", 1, 5), ("searchSec", 4, 40), ("paidSearchSec", 4, 120), ("turnSec", 6, 60), ("maxAuto", 0, 10), ("botMs", 300, 3000), ("maxStake", 1, 1000), ("minBombs", 1, 24), ("maxBombs", 1, 24)):
         if k in patch: v[k] = max(lo, min(hi, int(patch[k])))
     if v["minBombs"] > v["maxBombs"]: v["minBombs"] = v["maxBombs"]
     for k in ("enabled", "botsEnabled"):
@@ -45,7 +45,7 @@ def save_cfg(patch):
     _cfg.update(t=time.time(), v=v); return v
 
 def public_cfg():
-    c = cfg(); return {k: c[k] for k in ("enabled", "entries", "cutPct", "practicePerDay", "botsEnabled", "searchSec", "turnSec", "maxAuto", "botAfterFails", "minBombs", "maxBombs")}
+    c = cfg(); return {k: c[k] for k in ("enabled", "entries", "cutPct", "practicePerDay", "botsEnabled", "searchSec", "paidSearchSec", "turnSec", "maxAuto", "botAfterFails", "minBombs", "maxBombs")}
 
 def glock(gid):
     with LOCK: return GLOCKS.setdefault(gid, threading.RLock())
@@ -190,6 +190,8 @@ def leave(uid, gid):
 # ---------------------------------------------------------------- matchmaking (same rules as Coin Battle)
 def _key(practice, stake): return "p" if practice else f"s{stake}"
 
+def _wait(c, practice): return c["searchSec"] if practice else c["paidSearchSec"]    # cash matches wait longer: they only ever get a REAL player
+
 def _practice_used(uid):
     ref = fb.get_db().collection("bomb_stats").document(uid); s = ref.get().to_dict() or {}
     n = (int(s.get("practiceUsed", 0) or 0) + 1) if s.get("practiceDay") == today() else 1
@@ -220,7 +222,7 @@ def find(uid, entry, practice):
         for t in [t for t in TICKETS.values() if t["uid"] == uid and t["status"] == "waiting"]: _drop_ticket(t)
         key = _key(practice, entry); me = player_info(uid)
         for t in list(QUEUE.get(key, [])):
-            if t["uid"] != uid and time.time() - t["ts"] < c["searchSec"] + 4:
+            if t["uid"] != uid and time.time() - t["ts"] < _wait(c, practice) + 4:
                 opp = t["player"]
                 g, bad = create_game(opp, me, entry, practice)
                 QUEUE[key].remove(t)
@@ -233,7 +235,7 @@ def find(uid, entry, practice):
         tk = uuid.uuid4().hex[:12]
         t = {"id": tk, "uid": uid, "key": key, "entry": entry, "practice": practice, "player": me, "ts": time.time(), "status": "waiting", "gid": None}
         TICKETS[tk] = t; QUEUE.setdefault(key, []).append(t)
-        return {"status": "waiting", "ticket": tk, "searchSec": c["searchSec"], "attempt": FAILS.get(uid, {}).get("n", 0) + 1, "botAfter": c["botAfterFails"]}
+        return {"status": "waiting", "ticket": tk, "searchSec": _wait(c, practice), "attempt": FAILS.get(uid, {}).get("n", 0) + 1, "botAfter": c["botAfterFails"], "practice": practice}
 
 def poll(uid, tk):
     c = cfg()
@@ -242,12 +244,15 @@ def poll(uid, tk):
         if not t or t["uid"] != uid: return {"status": "none"}
         if t["status"] == "matched": return {"status": "matched", "gid": t["gid"]}
         if t["status"] != "waiting": return {"status": "cancelled"}
-        if time.time() - t["ts"] < c["searchSec"]: return {"status": "waiting", "left": int(c["searchSec"] - (time.time() - t["ts"]))}
+        w = _wait(c, t["practice"])
+        if time.time() - t["ts"] < w: return {"status": "waiting", "left": int(w - (time.time() - t["ts"]))}
         _drop_ticket(t)
+        if not t["practice"]:                      # CASH match: never a bot. Nothing was charged yet (entry is taken only when a real opponent is found).
+            return {"status": "nomatch", "paid": True}
         f = FAILS.setdefault(uid, {"n": 0, "t": 0})
         if time.time() - f["t"] > 900: f["n"] = 0
         f["n"] += 1; f["t"] = time.time()
-        if c["botsEnabled"] and f["n"] >= c["botAfterFails"]:
+        if c["botsEnabled"] and t["practice"] and f["n"] >= c["botAfterFails"]:
             g, bad = create_game(t["player"], bot_info(), t["entry"], t["practice"])
             if g is None: return {"status": "error", "error": "Not enough balance — add money first"}
             f["n"] = 0
