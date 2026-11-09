@@ -20,6 +20,7 @@ import './ops.js';
 import './ball.js';
 import './bomb.js';
 import './lbmanager.js';
+import './referral.js';
 import './siblings.js';
 
 // goTab hook: extra loading for finance / chat / reports / backup
@@ -36,6 +37,7 @@ A.goTab = function(id){
   if(id==='ball') A.ballLoad();
   if(id==='bomb') A.bombLoad();
   if(id==='lbm') A.lbmLoad();
+  if(id==='refer') A.referLoad();
 };
 
 /* ===== DOUBLE-TAP PROTECTION =====

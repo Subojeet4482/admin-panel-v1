@@ -129,6 +129,10 @@
       <div class="menu-btn-icon" style="background:#f59e0b;"><i class="fa-solid fa-ranking-star"></i></div>
       <div class="menu-btn-lbl">Leaderboard</div>
     </div>
+    <div class="menu-btn" onclick="A.goTab('refer')">
+      <div class="menu-btn-icon" style="background:#ec4899;"><i class="fa-solid fa-gift"></i></div>
+      <div class="menu-btn-lbl">Refer System</div>
+    </div>
     <div class="menu-btn" onclick="A.goTab('reports')" style="position:relative;">
       <div class="menu-btn-icon" style="background:#dc2626;"><i class="fa-solid fa-flag"></i></div>
       <div class="menu-btn-lbl">Reports</div>
@@ -417,6 +421,38 @@
         <button class="btn btn-primary" onclick="A.lbmHideInput()">Hide</button>
       </div>
     </div>
+  </div>
+</div>
+
+<div id="tab-refer" class="tab">
+  <div class="top-bar">
+    <h2 style="font-size:1.1rem;font-weight:800;"><i class="fa-solid fa-gift" style="color:#ec4899;"></i> Refer System</h2>
+    <button class="btn btn-outline" style="padding:6px 12px;font-size:0.78rem;" onclick="A.goTab('dash')"><i class="fa-solid fa-arrow-left"></i> Back</button>
+  </div>
+  <div class="page-pad" style="padding-top:14px;">
+    <div class="card"><div class="card-h">Totals</div><div id="rf-stats" class="muted">Loading…</div></div>
+    <div class="card">
+      <div class="card-h">Settings</div>
+      <div class="muted" id="rf-preview" style="font-size:.78rem;margin-bottom:12px;padding:10px;border-radius:10px;background:var(--bg-input,#f1f5f9)"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div><div class="lbl">Refer system</div><select class="inp" id="rf-enabled"><option value="1">ON</option><option value="0">OFF (paused)</option></select></div>
+        <div><div class="lbl">Friends needed for 1 card</div><input class="inp" id="rf-per" type="number" min="1" max="20"></div>
+        <div style="grid-column:1/3"><div class="lbl">Friend must deposit (₹) — 0 = FREE (card as soon as the friend joins)</div><input class="inp" id="rf-dep" type="number" min="0"></div>
+        <div><div class="lbl">Card amount</div><select class="inp" id="rf-mode"><option value="random">Random (min – max)</option><option value="fixed">Fixed</option></select></div>
+        <div><div class="lbl">Fixed amount (₹)</div><input class="inp" id="rf-fixed" type="number" min="1"></div>
+        <div><div class="lbl">Random MIN (₹)</div><input class="inp" id="rf-min" type="number" min="1"></div>
+        <div><div class="lbl">Random MAX (₹)</div><input class="inp" id="rf-max" type="number" min="1"></div>
+        <div style="grid-column:1/3"><div class="lbl">Reward goes to</div><select class="inp" id="rf-to"><option value="deposit">Deposit balance (play only — safest)</option><option value="withdraw">Withdrawable balance (user can withdraw)</option></select></div>
+        <div><div class="lbl">Code can be added within (hours of joining)</div><input class="inp" id="rf-win" type="number" min="1"></div>
+        <div><div class="lbl">Max friends per user (0 = no limit)</div><input class="inp" id="rf-maxref" type="number" min="0"></div>
+        <div style="grid-column:1/3"><div class="lbl">Max cards per user (0 = no limit)</div><input class="inp" id="rf-maxcard" type="number" min="0"></div>
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="A.referSave()">Save settings</button>
+      <div class="muted" style="font-size:.72rem;margin-top:10px">
+        <b>Safety tip:</b> a FREE card (deposit = 0) can be farmed with fake accounts. A deposit requirement + "Deposit balance" keeps it safe. The amount is chosen by the server when the user scratches — it cannot be changed from the phone.
+      </div>
+    </div>
+    <div class="card"><div class="card-h">Recent referrals</div><div id="rf-list"><span class="muted">Loading…</span></div></div>
   </div>
 </div>
 

@@ -4,7 +4,7 @@ import os, time, threading
 from flask import Flask, jsonify, request, send_from_directory, g, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-import fb, security, sysmon, jobs, chatadmin, keepalive, opsapi, panel, ballgame, bombgame
+import fb, security, sysmon, jobs, chatadmin, keepalive, opsapi, panel, ballgame, bombgame, referral
 import admin_lite as lite  # LITE panel (sub-admin: users/wallet/matches/settings)
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -329,6 +329,7 @@ for _rule, _methods, _fn in _LITE_ROUTES:
 # ------------------------------------------------------------------ Coin Battle (game server)
 ballgame.register(app)
 bombgame.register(app)
+referral.register(app)
 
 
 # ------------------------------------------------------------------ boot

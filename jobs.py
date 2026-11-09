@@ -59,18 +59,22 @@ def _loop():
 
 def _ball_loop():
     """Coin Battle housekeeping: resume games after a restart, settle abandoned games, drop old finished games."""
-    import ballgame, bombgame
+    import ballgame, bombgame, referral
     time.sleep(20)
     try: print(f"[ball] restored {ballgame.restore()} running game(s)", flush=True)
     except Exception as e: print("[ball] restore:", e, flush=True)
     try: print(f"[bomb] restored {bombgame.restore()} running game(s)", flush=True)
     except Exception as e: print("[bomb] restore:", e, flush=True)
-    last_purge = 0
+    last_purge = 0; last_ref = 0
     while True:
         try: ballgame.janitor()
         except Exception as e: print("[ball] janitor:", e, flush=True)
         try: bombgame.janitor()
         except Exception as e: print("[bomb] janitor:", e, flush=True)
+        if time.time() - last_ref > 120:      # friend deposited enough? -> referral qualifies -> scratch card issued
+            last_ref = time.time()
+            try: referral.qualify_pending()
+            except Exception as e: print("[ref] qualify:", e, flush=True)
         if time.time() - last_purge > 21600:
             last_purge = time.time()
             try: ballgame.purge_old(14)
