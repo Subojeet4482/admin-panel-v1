@@ -23,11 +23,19 @@ _cfg = {"t": 0, "v": dict(DEFAULT_CFG)}
 LOCK = threading.RLock()
 QUEUE, TICKETS, FAILS, GAMES, GLOCKS = {}, {}, {}, {}, {}
 
+_pub = {"v": None}
+def _publish(enabled):
+    """Mirror the ON/OFF switch to config/games so the app can hide the game card (written only when the value changes)."""
+    en = bool(enabled)
+    if _pub["v"] == en: return
+    try: fb.get_db().collection("config").document("games").set({"bomb": en}, merge=True); _pub["v"] = en
+    except Exception as e: print("[bomb] publish flag:", e, flush=True)
+
 def cfg(force=False):
     if force or time.time() - _cfg["t"] > 20:
         try:
             d = fb.get_db().collection("config").document("bomb").get()
-            v = dict(DEFAULT_CFG); v.update((d.to_dict() or {}) if d.exists else {}); _cfg["v"] = v
+            v = dict(DEFAULT_CFG); v.update((d.to_dict() or {}) if d.exists else {}); _cfg["v"] = v; _publish(v.get("enabled", True))
         except Exception: pass
         _cfg["t"] = time.time()
     return _cfg["v"]
@@ -42,6 +50,7 @@ def save_cfg(patch):
     for k in ("enabled", "botsEnabled"):
         if k in patch: v[k] = bool(patch[k])
     fb.get_db().collection("config").document("bomb").set(v)
+    _publish(v.get("enabled", True))
     _cfg.update(t=time.time(), v=v); return v
 
 def public_cfg():

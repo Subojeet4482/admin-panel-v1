@@ -251,7 +251,7 @@ service cloud.firestore {
 
     match /config/{docId} {
       // banner = logo, banners, notice, support, UPI, QR, crypto, WhatsApp, Telegram
-      allow read: if docId in ['banner', 'rules', 'leaderboard']
+      allow read: if docId in ['banner', 'rules', 'leaderboard', 'games']
                   || (signedIn() && docId in ['chat_words', 'chat_settings', 'chat_banner', 'verified']);
     }
 

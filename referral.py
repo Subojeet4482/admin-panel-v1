@@ -152,11 +152,22 @@ def claim(uid, code):
     evaluate(ref.id)
     return {"ok": True, "qualified": ok, "friend": mask(r.get("appName")), "need": need}
 
+def qualify_for(uid):
+    """When a referrer opens the page: check ONLY his own pending friends (a few reads) so a fresh deposit shows up at once."""
+    c = cfg(); db = fb.get_db(); need = int(c["depositRequired"]); n = 0
+    for s in db.collection("referrals").where("referrer", "==", uid).where("status", "==", "pending").stream():
+        try:
+            u = db.collection("users").document(s.id).get().to_dict() or {}
+            if need <= 0 or float(u.get("totalDeposited", 0) or 0) >= need: s.reference.update({"status": "qualified", "qualifiedAt": NOW()}); n += 1
+        except Exception as e: print("[ref] qualify_for:", e, flush=True)
+    return n
+
 def qualify_pending():
-    """background: a pending referral qualifies as soon as the friend's total deposit reaches the amount."""
-    c = cfg(); db = fb.get_db(); need = int(c["depositRequired"]); touched = set(); n = 0
+    """background: a pending referral qualifies as soon as the friend's total deposit reaches the amount. Only referrals from the last 30 days are checked (old never-deposited ones cost reads for nothing)."""
+    c = cfg(); db = fb.get_db(); need = int(c["depositRequired"]); touched = set(); n = 0; cutoff = NOW() - 30 * 86400000
     for s in db.collection("referrals").where("status", "==", "pending").limit(400).stream():
         r = s.to_dict() or {}
+        if int(r.get("createdAt", 0) or 0) < cutoff: continue
         try:
             u = db.collection("users").document(s.id).get().to_dict() or {}
             if need <= 0 or float(u.get("totalDeposited", 0) or 0) >= need:
@@ -169,6 +180,9 @@ def qualify_pending():
 # ------------------------------------------------------------------ info for the app
 def info(uid):
     c = cfg(); db = fb.get_db(); u = db.collection("users").document(uid).get().to_dict() or {}
+    if c["enabled"]:
+        try: qualify_for(uid)
+        except Exception as e: print("[ref] info-qualify:", e, flush=True)
     cards, q = evaluate(uid) if c["enabled"] else ({}, 0)
     refs = [d.to_dict() for d in db.collection("referrals").where("referrer", "==", uid).stream()]
     refs.sort(key=lambda x: -int(x.get("createdAt", 0)))
@@ -186,7 +200,7 @@ def info(uid):
                       "fresh": sum(1 for x in cards.values() if x.get("status") == "new"), "earned": round(sum(float(x.get("amount", 0) or 0) for x in cards.values() if x.get("status") == "scratched"), 2)},
             "progress": {"per": per, "have": q % per, "toNext": per - (q % per)}, "referredBy": by, "canClaim": can,
             "cards": [{"id": k, "seq": x.get("seq"), "status": x.get("status"), "amount": x.get("amount", 0), "at": x.get("scratchedAt") or x.get("createdAt")} for k, x in sorted(cards.items(), key=lambda kv: (kv[1].get("status") != "new", -int(kv[1].get("seq", 0))))],
-            "friends": [{"name": mask(r.get("referredName")), "status": r.get("status"), "at": r.get("createdAt")} for r in refs[:30]]}
+            "friends": [{"name": (r.get("referredName") or "Player"), "status": r.get("status"), "at": r.get("createdAt")} for r in refs[:30]]}
 
 # ------------------------------------------------------------------ HTTP
 def register(app):

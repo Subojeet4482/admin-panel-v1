@@ -163,11 +163,19 @@ FAILS = {}          # uid -> {"n": consecutive failed searches, "t": last}
 GAMES = {}          # gid -> game dict (cache; Firestore is the truth)
 GLOCKS = {}         # gid -> RLock
 
+_pub = {"v": None}
+def _publish(enabled):
+    """Mirror the ON/OFF switch to config/games so the app can hide the game card (written only when the value changes)."""
+    en = bool(enabled)
+    if _pub["v"] == en: return
+    try: fb.get_db().collection("config").document("games").set({"ball": en}, merge=True); _pub["v"] = en
+    except Exception as e: print("[ball] publish flag:", e, flush=True)
+
 def cfg(force=False):
     if force or time.time() - _cfg["t"] > 20:
         try:
             d = fb.get_db().collection("config").document("ball").get()
-            v = dict(DEFAULT_CFG); v.update((d.to_dict() or {}) if d.exists else {}); _cfg["v"] = v
+            v = dict(DEFAULT_CFG); v.update((d.to_dict() or {}) if d.exists else {}); _cfg["v"] = v; _publish(v.get("enabled", True))
         except Exception: pass
         _cfg["t"] = time.time()
     return _cfg["v"]
@@ -181,6 +189,7 @@ def save_cfg(patch):
     for k in ("enabled", "botsEnabled"):
         if k in patch: v[k] = bool(patch[k])
     fb.get_db().collection("config").document("ball").set(v)
+    _publish(v.get("enabled", True))
     _cfg.update(t=time.time(), v=v); return v
 
 def public_cfg():

@@ -16,6 +16,11 @@ Object.assign(A, {
       }).join('') : '<span class="muted">No games yet</span>';
     } catch (e) { A.fail(e); }
   },
+  async ballToggle(el) {
+    const on = el.checked;
+    try { await A.api('/api/ball/admin/config', { body: { enabled: on } }); A.toast('Coin Battle ' + (on ? 'ON — visible in the app' : 'OFF — hidden from the app') + ' ✓'); }
+    catch (e) { el.checked = !on; A.fail(e); }
+  },
   async ballSave() {
     const n = (id) => parseInt($(id).value, 10);
     try {

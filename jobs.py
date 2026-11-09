@@ -71,7 +71,7 @@ def _ball_loop():
         except Exception as e: print("[ball] janitor:", e, flush=True)
         try: bombgame.janitor()
         except Exception as e: print("[bomb] janitor:", e, flush=True)
-        if time.time() - last_ref > 120:      # friend deposited enough? -> referral qualifies -> scratch card issued
+        if time.time() - last_ref > 600:      # friend deposited enough? -> referral qualifies -> scratch card issued
             last_ref = time.time()
             try: referral.qualify_pending()
             except Exception as e: print("[ref] qualify:", e, flush=True)

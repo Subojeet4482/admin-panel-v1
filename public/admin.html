@@ -342,9 +342,11 @@
     <button class="btn btn-outline" style="padding:6px 12px;font-size:0.78rem;" onclick="A.goTab('dash')"><i class="fa-solid fa-arrow-left"></i> Back</button>
   </div>
   <div class="page-pad" style="padding-top:14px;">
+    <div class="card" style="border:2px solid #7c3aed33"><div class="card-h">Show in app</div>
+      <label class="ls-switch2"><input type="checkbox" id="bl-enabled" onchange="A.ballToggle(this)"><i></i><span><b>Coin Battle ON</b> — OFF hides the game from the app page and blocks play (saved instantly)</span></label>
+    </div>
     <div class="ball-stats" id="ball-stats"><span class="muted">Loading…</span></div>
     <div class="card"><div class="card-h">Game settings <span class="muted" style="font-weight:600">(live — no restart)</span></div>
-      <label class="ls-switch2"><input type="checkbox" id="bl-enabled"><i></i><span>Game ON (users can play)</span></label>
       <label class="ls-switch2" style="margin-top:8px"><input type="checkbox" id="bl-bots"><i></i><span>Bots allowed when no real player is found (always labelled BOT)</span></label>
       <div class="lbl" style="margin-top:12px">Entry amounts ₹ (comma separated)</div><input class="inp" id="bl-entries" placeholder="2,5,10">
       <div class="ball-grid">
@@ -370,9 +372,11 @@
     <button class="btn btn-outline" style="padding:6px 12px;font-size:0.78rem;" onclick="A.goTab('dash')"><i class="fa-solid fa-arrow-left"></i> Back</button>
   </div>
   <div class="page-pad" style="padding-top:14px;">
+    <div class="card" style="border:2px solid #7c3aed33"><div class="card-h">Show in app</div>
+      <label class="ls-switch2"><input type="checkbox" id="bm-enabled" onchange="A.bombToggle(this)"><i></i><span><b>Bomb &amp; Gems ON</b> — OFF hides the game from the app page and blocks play (saved instantly)</span></label>
+    </div>
     <div class="bomb-stats" id="bomb-stats"><span class="muted">Loading…</span></div>
     <div class="card"><div class="card-h">Game settings <span class="muted" style="font-weight:600">(live — no restart)</span></div>
-      <label class="ls-switch2"><input type="checkbox" id="bm-enabled"><i></i><span>Game ON (users can play)</span></label>
       <label class="ls-switch2" style="margin-top:8px"><input type="checkbox" id="bm-bots"><i></i><span>Bots allowed in FREE practice matches only (always labelled BOT). Cash matches never get a bot.</span></label>
       <div class="lbl" style="margin-top:12px">Entry amounts ₹ (comma separated)</div><input class="inp" id="bm-entries" placeholder="2,5,10">
       <div class="ball-grid">
