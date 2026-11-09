@@ -111,6 +111,7 @@ service cloud.firestore {
         let h = d.get('lastGiftHash', '');
         return h is string && h != '' && h != o.get('lastGiftHash', '') && delta > 0
           && get(giftPath(h)).data.balance == kind
+          && get(giftPath(h)).data.get('reward', 'instant') != 'scratch'     // scratch-type codes never credit instantly (the server issues a scratch card)
           && !exists(giftRedPath(h, request.auth.uid)) && existsAfter(giftRedPath(h, request.auth.uid))
           && getAfter(giftRedPath(h, request.auth.uid)).data.amount == delta;
       }
@@ -162,6 +163,7 @@ service cloud.firestore {
               || (t.type == 'deposit' && t.status == 'pending' && t.get('method', '') == 'UPI' && cfgOn('depositEnabled'))
               || (t.type == 'withdraw' && t.status == 'pending' && validWithdraw(uid, t))
               || (t.type == 'deposit' && t.status == 'success' && t.get('kind', '') == 'gift'
+                  && get(giftPath(t.giftHash)).data.get('reward', 'instant') != 'scratch'
                   && existsAfter(giftRedPath(t.giftHash, uid))
                   && getAfter(giftRedPath(t.giftHash, uid)).data.amount == float(t.amount.split('₹')[1]));
         }

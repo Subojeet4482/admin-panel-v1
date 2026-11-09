@@ -2,7 +2,7 @@
 import { db, doc, getDoc, setDoc, getDocs, updateDoc, deleteDoc, collection } from './firebase.js';
 const $ = (id) => document.getElementById(id);
 const esc = A.esc;
-const G = { type: 'fix', code: 'auto', bal: 'deposit', timer: null };
+const G = { type: 'fix', code: 'auto', bal: 'deposit', reward: 'instant', timer: null };
 const SYM = '!@#$%^&*-_+=?';
 const rnd = (n) => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n; };
 const sha = async (t) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -20,6 +20,7 @@ Object.assign(window.A, {
   gfCode(m) { G.code = m; $('gf-c-auto').classList.toggle('on', m === 'auto'); $('gf-c-man').classList.toggle('on', m === 'manual'); const i = $('gf-code'); i.readOnly = m === 'auto'; if (m === 'auto') i.value = genCode(); else i.value = ''; A.gfCount(); },
   gfGen() { $('gf-code').value = genCode(); A.gfCount(); },
   gfCount() { const n = $('gf-code').value.length; $('gf-count').innerHTML = `${n} / 24 ${n === 24 ? '<span class="tag green">ready</span>' : ''}`; },
+  gfReward(r) { G.reward = r; $('gf-r-inst').classList.toggle('on', r === 'instant'); $('gf-r-scr').classList.toggle('on', r === 'scratch'); $('gf-r-hint').textContent = r === 'scratch' ? 'The user gets a SCRATCH CARD (shown in Refer & Earn + Notifications). Money is added only when they scratch it. Amount below = fixed or min–max.' : 'Money is added to the wallet the moment the code is redeemed.'; },
   gfBal(b) { G.bal = b; $('gf-b-dep').classList.toggle('on', b === 'deposit'); $('gf-b-wd').classList.toggle('on', b === 'withdraw'); },
   async gfCreate() {
     const code = $('gf-code').value; if (code.length !== 24 || /\s/.test(code)) return A.toast('Code must be exactly 24 characters (no spaces)', 'err');
@@ -30,9 +31,9 @@ Object.assign(window.A, {
     else { const lo = Math.floor(Number($('gf-min').value)), hi = Math.floor(Number($('gf-max').value)); if (!(lo >= 1 && hi >= lo)) return A.toast('Enter min and max (max ≥ min)', 'err'); pool = Array.from({ length: max }, () => lo + rnd(hi - lo + 1)); label = `₹${lo}–₹${hi}`; }
     const h = await sha(code);
     if ((await getDoc(doc(db, 'gift_codes', h))).exists()) return A.toast('This code already exists', 'err');
-    if (!confirm(`Create gift code?\n${label} · ${max} user(s) · ${G.bal === 'deposit' ? 'Deposit' : 'Withdrawal'} balance`)) return;
+    if (!confirm(`Create gift code?\n${G.reward === 'scratch' ? 'SCRATCH CARD · ' : ''}${label} · ${max} user(s) · ${G.bal === 'deposit' ? 'Deposit' : 'Withdrawal'} balance`)) return;
     try {
-      await setDoc(doc(db, 'gift_codes', h), { code, status: 'active', type: G.type, label, pool, max, used: 0, balance: G.bal, expiresAt: Date.now() + mins * 1000, createdAt: Date.now(), note: $('gf-note').value.trim() });
+      await setDoc(doc(db, 'gift_codes', h), { code, status: 'active', type: G.type, reward: G.reward, label, pool, max, used: 0, balance: G.bal, expiresAt: Date.now() + mins * 1000, createdAt: Date.now(), note: $('gf-note').value.trim() });
       A.copyText(code); A.toast('Gift code created & copied 🎁'); A.gfCode('auto'); $('gf-note').value = ''; A.gfLoad();
     } catch (e) { A.toast('Error: ' + e.message, 'err'); }
   },
@@ -46,7 +47,7 @@ Object.assign(window.A, {
         const st = c.status === 'revoked' ? 'revoked' : c.expiresAt < Date.now() ? 'expired' : (c.used >= c.max ? 'full' : 'active');
         return `<div class="card gf-card ${st} fade-up" style="animation-delay:${Math.min(i, 8) * 40}ms">
           <div class="gf-top"><span class="gf-code" onclick="A.copyText('${esc(c.code).replace(/'/g, "\\'")}')" title="Copy">${esc(c.code)} <i class="fa-regular fa-copy"></i></span><span class="st st-${st === 'active' ? 'success' : st === 'revoked' ? 'failed' : 'pending'}">${st}</span></div>
-          <div class="gf-meta"><span class="tag">${c.type === 'fix' ? 'Fixed' : 'Random'} ${esc(c.label || '')}</span><span class="tag ${c.balance === 'withdraw' ? 'gold' : ''}">${c.balance === 'withdraw' ? 'WD' : 'DP'} balance</span>${c.note ? `<span class="tag">${esc(c.note)}</span>` : ''}</div>
+          <div class="gf-meta"><span class="tag">${c.type === 'fix' ? 'Fixed' : 'Random'} ${esc(c.label || '')}</span>${c.reward === 'scratch' ? '<span class="tag gold">🎟 Scratch card</span>' : ''}<span class="tag ${c.balance === 'withdraw' ? 'gold' : ''}">${c.balance === 'withdraw' ? 'WD' : 'DP'} balance</span>${c.note ? `<span class="tag">${esc(c.note)}</span>` : ''}</div>
           <div class="gf-bar"><i style="width:${Math.min(100, (c.used || 0) / c.max * 100)}%"></i></div>
           <div class="gf-row"><span>${c.used || 0} / ${c.max} used</span><span class="gf-left" data-t="${c.expiresAt}" data-s="${st}">${st === 'revoked' ? 'revoked' : left(c.expiresAt - Date.now())}</span></div>
           <div class="btn-row"><button class="btn btn-outline" style="flex:1;" onclick="A.gfUsers('${c.id}')"><i class="fa-solid fa-users"></i> Redeemed</button>
@@ -62,6 +63,15 @@ Object.assign(window.A, {
   async gfUsers(id) {
     const box = $('gfu-' + id); if (box.innerHTML) { box.innerHTML = ''; return; }
     const r = await getDocs(collection(db, 'gift_codes', id, 'redeems')); const a = []; r.forEach(d => a.push({ id: d.id, ...d.data() })); a.sort((x, y) => y.at - x.at);
-    box.innerHTML = a.length ? '<div class="gf-users">' + a.map(u => `<div><b>${esc(u.name || 'User')}</b> <small>${esc(u.id.slice(0, 8))}</small><span>₹${u.amount}</span><small>${esc(u.orderNo || '')}</small></div>`).join('') + '</div>' : '<div class="muted" style="padding:8px;">Nobody has used it yet.</div>';
+    let cards = {};   // scratch-type code: status of each user's card (new / scratched / cancelled)
+    try { const c = await A.api('/api/ref/admin/cards', { body: { hash: id } }); (c.cards || []).forEach(x => { cards[x.uid] = x; }); } catch (e) {}
+    box.innerHTML = a.length ? '<div class="gf-users">' + a.map(u => { const k = cards[u.id];
+      const st = k ? (k.status === 'new' ? '<small>🎟 not scratched</small>' : k.status === 'cancelled' ? '<small style="color:#b91c1c">cancelled</small>' : '<small style="color:#15803d">scratched ₹' + k.amount + '</small>') : '';
+      const cancel = k && k.status === 'new' ? `<button class="btn btn-danger" style="padding:2px 8px;font-size:.68rem" onclick="A.gfCancelCard('${esc(k.id)}','${id}')">Cancel card</button>` : '';
+      return `<div><b>${esc(u.name || 'User')}</b> <small>${esc(u.id.slice(0, 8))}</small><span>₹${u.amount}</span><small>${esc(u.orderNo || '')}</small> ${st} ${cancel}</div>`; }).join('') + '</div>' : '<div class="muted" style="padding:8px;">Nobody has used it yet.</div>';
+  },
+  async gfCancelCard(card, id) {
+    if (!confirm('Cancel this scratch card? The user cannot scratch it any more and gets a notification.')) return;
+    try { await A.api('/api/ref/admin/cancelcard', { body: { card } }); A.toast('Card cancelled — user notified'); const b = $('gfu-' + id); if (b) { b.innerHTML = ''; A.gfUsers(id); } } catch (e) { A.toast('Error: ' + (e.message || e), 'err'); }
   }
 });

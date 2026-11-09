@@ -70,7 +70,7 @@ def evaluate(uid):
         q = sum(1 for _ in db.collection("referrals").where("referrer", "==", uid).where("status", "==", "qualified").stream())
         earned = q // max(1, int(c["referralsPerCard"]))
         if int(c["maxCardsPerUser"]) > 0: earned = min(earned, int(c["maxCardsPerUser"]))
-        cards = {d.id: d.to_dict() for d in db.collection("ref_cards").where("uid", "==", uid).stream()}
+        cards = {d.id: d.to_dict() for d in db.collection("ref_cards").where("uid", "==", uid).stream() if (d.to_dict() or {}).get("src", "ref") == "ref"}
         top = max([int(x.get("seq", 0)) for x in cards.values()] or [0]); new = 0
         while len(cards) < earned:
             top += 1; cid = f"{uid}_{top}"
@@ -95,27 +95,111 @@ def _roll(c):
 
 def scratch(uid, cid):
     c = cfg()
-    if not c["enabled"]: return {"ok": False, "error": "Refer & Earn is switched off right now"}
     if not cid.startswith(uid + "_"): return {"ok": False, "error": "Card not found"}
     def run(tx, db):
         cref = db.collection("ref_cards").document(cid); cs = cref.get(transaction=tx)
         if not cs.exists or (cs.to_dict() or {}).get("uid") != uid: return ("err", "Card not found")
-        cd = cs.to_dict()
+        cd = cs.to_dict(); src = cd.get("src", "ref")
+        if cd.get("status") == "cancelled": return ("err", "This card was cancelled")
         if cd.get("status") != "new": return ("done", float(cd.get("amount", 0)))        # already scratched: show the same amount again, never pay twice
+        if src == "ref" and not c["enabled"]: return ("err", "Refer & Earn is switched off right now")
         uref = db.collection("users").document(uid); us = uref.get(transaction=tx)
         if not us.exists: return ("err", "Account not found")
         u = us.to_dict() or {}
         if u.get("banned") or u.get("blocked"): return ("err", "Account restricted")
-        amt = _roll(c); dep, wd = _bal(u)
-        up = {"withdrawBalance": round(wd + amt, 2), "totalEarned": round(float(u.get("totalEarned", 0) or 0) + amt, 2)} if c["creditTo"] == "withdraw" else {"depositBalance": round(dep + amt, 2)}
-        tx.update(uref, up); tx.update(cref, {"status": "scratched", "amount": amt, "scratchedAt": NOW(), "creditedTo": c["creditTo"]})
+        if src == "ref": amt, to = _roll(c), c["creditTo"]
+        else:   # gift-code / admin card: fixed prize (gift code pool) or a random amount inside the min..max the admin set
+            to = cd.get("creditTo", "deposit")
+            amt = float(cd["prize"]) if cd.get("prize") else float(random.randint(int(cd.get("min", 1)), max(int(cd.get("min", 1)), int(cd.get("max", 1)))))
+        dep, wd = _bal(u)
+        up = {"withdrawBalance": round(wd + amt, 2), "totalEarned": round(float(u.get("totalEarned", 0) or 0) + amt, 2)} if to == "withdraw" else {"depositBalance": round(dep + amt, 2)}
+        tx.update(uref, up); tx.update(cref, {"status": "scratched", "amount": amt, "scratchedAt": NOW(), "creditedTo": to})
         tref = uref.collection("transactions").document()
-        tx.set(tref, {"title": "Referral Scratch Card 🎁", "amount": f"+₹{amt:g}", "type": "game", "kind": "gift", "status": "success", "date": dt.datetime.now(IST).strftime("%d/%m/%Y"), "timestamp": fs.SERVER_TIMESTAMP, "createdAt": NOW()})
+        title = {"ref": "Referral Scratch Card 🎁", "gift": "Gift Scratch Card 🎁"}.get(src, "Reward Scratch Card 🎁")
+        tx.set(tref, {"title": title, "amount": f"+₹{amt:g}", "type": "game", "kind": "gift", "status": "success", "date": dt.datetime.now(IST).strftime("%d/%m/%Y"), "timestamp": fs.SERVER_TIMESTAMP, "createdAt": NOW()})
         return ("ok", amt)
     with ulock(uid): st, val = _tx(run)
     if st == "err": return {"ok": False, "error": val}
     if st == "ok": _tot(cardsScratched=1, paid=val)
     return {"ok": True, "amount": val, "already": st == "done"}
+
+# ------------------------------------------------------------------ gift-code / admin cards (src = "gift" | "admin")
+def _card_notify(uid, title, msg, card=None):
+    try:
+        d = {"title": title, "message": msg, "date": dt.datetime.now(IST).strftime("%d %b %Y"), "timestamp": fs.SERVER_TIMESTAMP, "type": "reward"}
+        if card: d["scratchCard"] = card
+        fb.get_db().collection("users").document(uid).collection("notifications").document().set(d)
+    except Exception as e: print("[ref] notify:", e, flush=True)
+
+def giftcard(uid, h):
+    """After a user redeemed a SCRATCH-type gift code: turn the redeem record into a scratch card (idempotent, amount = the pool amount the Firestore rules already fixed)."""
+    h = str(h or "").strip().lower()
+    if not (len(h) == 64 and all(ch in "0123456789abcdef" for ch in h)): return {"ok": False, "error": "Invalid code"}
+    db = fb.get_db(); code = db.collection("gift_codes").document(h).get()
+    if not code.exists or (code.to_dict() or {}).get("reward") != "scratch": return {"ok": False, "error": "Not a scratch code"}
+    red = db.collection("gift_codes").document(h).collection("redeems").document(uid).get()
+    if not red.exists: return {"ok": False, "error": "Redeem record not found"}
+    cd, r = code.to_dict(), red.to_dict()
+    cid = f"{uid}_g{h[:10]}"
+    try: db.collection("ref_cards").document(cid).create({"uid": uid, "seq": 0, "status": "new", "amount": 0, "prize": float(r.get("amount", 0)), "src": "gift", "code": h,
+                                                           "creditTo": "withdraw" if cd.get("balance") == "withdraw" else "deposit", "createdAt": NOW()})
+    except AlreadyExists: return {"ok": True, "card": cid, "already": True}
+    _tot(cardsIssued=1)
+    _card_notify(uid, "🎁 You won a Scratch Card!", "Your gift code gave you a scratch card. Open it from here or from Refer & Earn and scratch to reveal your prize.", cid)
+    return {"ok": True, "card": cid}
+
+def sync_gift(uid, u):
+    """Safety net: if the phone could not call giftcard() (server asleep), the last redeemed gift hash is checked when the user opens Refer & Earn."""
+    h = str((u or {}).get("lastGiftHash") or "")
+    if h:
+        try: giftcard(uid, h)
+        except Exception as e: print("[ref] sync_gift:", e, flush=True)
+
+def admin_send(p):
+    """Admin -> user: send N scratch cards (fixed or random min..max, to deposit or withdraw wallet). The user gets a notification with a 'Scratch now' button."""
+    key = str(p.get("user", "")).strip()
+    if not key: return {"ok": False, "error": "Enter the user's Player ID or UID"}
+    db = fb.get_db(); uid = None
+    ud = db.collection("users").document(key).get() if len(key) > 12 else None
+    if ud is not None and ud.exists: uid = key
+    else:
+        f = _find_by_code("".join(ch for ch in key if ch.isdigit()))
+        if f: uid = f.id
+    if not uid: return {"ok": False, "error": "User not found"}
+    n = max(1, min(10, int(float(p.get("count", 1) or 1)))); mode = p.get("mode") if p.get("mode") in ("fixed", "random") else "random"
+    lo, hi = max(1, int(float(p.get("min", 1) or 1))), max(1, int(float(p.get("max", 1) or 1))); fx = max(1, int(float(p.get("fixed", 1) or 1)))
+    if lo > hi: lo, hi = hi, lo
+    if mode == "fixed": lo = hi = fx
+    to = "withdraw" if p.get("creditTo") == "withdraw" else "deposit"; note = str(p.get("note", "") or "")[:80]; ids = []
+    for i in range(n):
+        cid = f"{uid}_a{NOW()}{i}"
+        db.collection("ref_cards").document(cid).create({"uid": uid, "seq": 0, "status": "new", "amount": 0, "min": lo, "max": hi, "src": "admin", "creditTo": to, "note": note, "createdAt": NOW()}); ids.append(cid)
+    _tot(cardsIssued=n)
+    _card_notify(uid, "🎁 You received a Scratch Card!" if n == 1 else f"🎁 You received {n} Scratch Cards!", note or "FF Cash Battle sent you a scratch card. Scratch it to reveal your prize!", ids[0])
+    return {"ok": True, "uid": uid, "cards": ids}
+
+def admin_cancel(cid):
+    """Admin cancels an UNSCRATCHED card (gift / admin / referral). Scratched cards cannot be taken back. The user is told in Notifications."""
+    ref = fb.get_db().collection("ref_cards").document(str(cid)); s = ref.get()
+    if not s.exists: return {"ok": False, "error": "Card not found"}
+    d = s.to_dict() or {}
+    if d.get("status") == "scratched": return {"ok": False, "error": "User already scratched this card"}
+    if d.get("status") == "cancelled": return {"ok": True}
+    with ulock(d.get("uid", "")): 
+        cur = ref.get().to_dict() or {}
+        if cur.get("status") != "new": return {"ok": False, "error": "User already scratched this card"}
+        ref.update({"status": "cancelled", "cancelledAt": NOW()})
+    _card_notify(d.get("uid"), "Scratch Card cancelled", "One of your scratch cards was cancelled by admin. Contact support if you think this is a mistake.")
+    return {"ok": True}
+
+def admin_cards(h=None):
+    db = fb.get_db(); q = db.collection("ref_cards").where("code", "==", h) if h else db.collection("ref_cards").order_by("createdAt", direction="DESCENDING").limit(60)
+    rows = []
+    for s in q.stream():
+        x = s.to_dict() or {}
+        if not h and x.get("src", "ref") == "ref": continue
+        rows.append({"id": s.id, "uid": x.get("uid"), "src": x.get("src", "ref"), "status": x.get("status"), "amount": x.get("amount", 0), "prize": x.get("prize"), "min": x.get("min"), "max": x.get("max"), "at": x.get("createdAt")})
+    return rows
 
 # ------------------------------------------------------------------ binding a friend
 def _find_by_code(code):
@@ -183,11 +267,12 @@ def info(uid):
     if c["enabled"]:
         try: qualify_for(uid)
         except Exception as e: print("[ref] info-qualify:", e, flush=True)
+    sync_gift(uid, u)
     cards, q = evaluate(uid) if c["enabled"] else ({}, 0)
+    cards = {d.id: d.to_dict() for d in db.collection("ref_cards").where("uid", "==", uid).stream()}      # referral + gift + admin cards
     refs = [d.to_dict() for d in db.collection("referrals").where("referrer", "==", uid).stream()]
     refs.sort(key=lambda x: -int(x.get("createdAt", 0)))
     per = max(1, int(c["referralsPerCard"])); code = str(u.get("playerId") or "")
-    lst = sorted(cards.values(), key=lambda x: (x.get("status") != "new", -int(x.get("seq", 0))))
     can = False
     if c["enabled"] and not u.get("referredBy"):
         try: can = NOW() - int(fauth.get_user(uid).user_metadata.creation_timestamp) <= int(c["claimWindowHrs"]) * 3600000
@@ -199,7 +284,7 @@ def info(uid):
             "stats": {"joined": len(refs), "qualified": q, "pending": sum(1 for r in refs if r.get("status") == "pending"), "cards": len(cards),
                       "fresh": sum(1 for x in cards.values() if x.get("status") == "new"), "earned": round(sum(float(x.get("amount", 0) or 0) for x in cards.values() if x.get("status") == "scratched"), 2)},
             "progress": {"per": per, "have": q % per, "toNext": per - (q % per)}, "referredBy": by, "canClaim": can,
-            "cards": [{"id": k, "seq": x.get("seq"), "status": x.get("status"), "amount": x.get("amount", 0), "at": x.get("scratchedAt") or x.get("createdAt")} for k, x in sorted(cards.items(), key=lambda kv: (kv[1].get("status") != "new", -int(kv[1].get("seq", 0))))],
+            "cards": [{"id": k, "seq": x.get("seq"), "status": x.get("status"), "amount": x.get("amount", 0), "src": x.get("src", "ref"), "to": x.get("creditTo"), "min": x.get("min"), "max": x.get("max"), "at": x.get("scratchedAt") or x.get("createdAt")} for k, x in sorted(cards.items(), key=lambda kv: (kv[1].get("status") != "new", -int(kv[1].get("seq", 0) or 0), -int(kv[1].get("createdAt", 0) or 0)))],
             "friends": [{"name": (r.get("referredName") or "Player"), "status": r.get("status"), "at": r.get("createdAt")} for r in refs[:30]]}
 
 # ------------------------------------------------------------------ HTTP
@@ -223,6 +308,8 @@ def register(app):
     def r_info(uid, d): return info(uid)
     @route("/api/ref/claim")
     def r_claim(uid, d): return claim(uid, d.get("code"))
+    @route("/api/ref/giftcard")
+    def r_giftcard(uid, d): return giftcard(uid, d.get("hash"))
     @route("/api/ref/scratch")
     def r_scratch(uid, d): return scratch(uid, str(d.get("card", "")))
 
@@ -236,6 +323,15 @@ def register(app):
     @app.post("/api/ref/admin/config")
     @security.login_required
     def ref_a_config(): return jsonify(ok=True, cfg=save_cfg(request.get_json(silent=True) or {}))
+    @app.post("/api/ref/admin/sendcard")
+    @security.login_required
+    def ref_a_send(): return jsonify(admin_send(request.get_json(silent=True) or {}))
+    @app.post("/api/ref/admin/cancelcard")
+    @security.login_required
+    def ref_a_cancel(): return jsonify(admin_cancel(str((request.get_json(silent=True) or {}).get("card", ""))))
+    @app.post("/api/ref/admin/cards")
+    @security.login_required
+    def ref_a_cards(): return jsonify(ok=True, cards=admin_cards((request.get_json(silent=True) or {}).get("hash")))
     @app.post("/api/ref/admin/void")
     @security.login_required
     def ref_a_void():

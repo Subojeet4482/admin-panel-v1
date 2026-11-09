@@ -18,6 +18,7 @@ const chip = (s) => s === 'qualified' ? '<span class="tag" style="background:#dc
 
 Object.assign(window.A, {
   async referLoad() {
+    A.scList();
     ['rf-enabled', 'rf-per', 'rf-dep', 'rf-mode', 'rf-fixed', 'rf-min', 'rf-max', 'rf-to'].forEach(id => { const e = $(id); if (e && !e._p) { e._p = 1; e.addEventListener('input', preview); e.addEventListener('change', preview); } });
     try {
       const r = await A.api('/api/ref/admin/overview'); if (!r.ok) throw new Error(r.error || 'failed');
@@ -35,6 +36,28 @@ Object.assign(window.A, {
         minAmount: n('rf-min'), maxAmount: n('rf-max'), creditTo: $('rf-to').value, claimWindowHrs: n('rf-win'), maxReferralsPerUser: n('rf-maxref'), maxCardsPerUser: n('rf-maxcard') } });
       if (!r.ok) throw new Error(r.error || 'failed'); fill(r.cfg); A.toast('Refer settings saved ✓');
     } catch (e) { A.toast('Error: ' + (e.message || e), 'err'); }
+  },
+  scMode() { const f = $('sc-mode').value === 'fixed'; $('sc-rnd').classList.toggle('hidden', f); $('sc-fix').classList.toggle('hidden', !f); },
+  async scSend() {
+    const user = $('sc-user').value.trim(); if (!user) return A.toast('Enter Player ID or UID', 'err');
+    const body = { user, count: n('sc-count') || 1, mode: $('sc-mode').value, min: n('sc-min'), max: n('sc-max'), fixed: n('sc-fixed'), creditTo: $('sc-to').value, note: $('sc-note').value.trim() };
+    if (body.mode === 'random' && !(body.min >= 1 && body.max >= body.min)) return A.toast('Enter min and max (max ≥ min)', 'err');
+    if (!confirm(`Send ${body.count} scratch card(s) to ${user}?\n${body.mode === 'fixed' ? inr(body.fixed) : inr(body.min) + ' – ' + inr(body.max)} each · ${body.creditTo === 'withdraw' ? 'withdrawable' : 'deposit'} balance`)) return;
+    try { const r = await A.api('/api/ref/admin/sendcard', { body }); A.toast('Sent ✓'); $('sc-user').value = ''; $('sc-note').value = ''; A.scList(); return r; } catch (e) { A.toast('Error: ' + (e.message || e), 'err'); }
+  },
+  async scList() {
+    const box = $('sc-list'); if (!box) return;
+    try {
+      const r = await A.api('/api/ref/admin/cards', { body: {} });
+      box.innerHTML = (r.cards || []).length ? r.cards.map(x => `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border,#eee)">
+        <div style="flex:1;min-width:0"><div style="font-weight:700">${x.src === 'gift' ? '🎁 Gift code' : '👤 Admin'} · ${x.status === 'scratched' ? inr(x.amount) + ' won' : x.status === 'cancelled' ? 'cancelled' : x.prize ? inr(x.prize) : (x.min === x.max ? inr(x.min) : inr(x.min) + '–' + inr(x.max))}</div>
+        <div class="muted" style="font-size:.66rem;word-break:break-all">${esc(x.uid)} · ${x.at ? new Date(x.at).toLocaleString('en-IN') : ''}</div></div>
+        ${x.status === 'new' ? `<button class="btn btn-danger" style="padding:4px 9px;font-size:.7rem" onclick="A.scCancel('${esc(x.id)}')">Cancel</button>` : `<span class="tag">${esc(x.status)}</span>`}</div>`).join('') : '<span class="muted">No gift / admin cards yet.</span>';
+    } catch (e) { box.innerHTML = '<span class="muted">Could not load: ' + esc(e.message || e) + '</span>'; }
+  },
+  async scCancel(card) {
+    if (!confirm('Cancel this scratch card? The user gets a notification.')) return;
+    try { await A.api('/api/ref/admin/cancelcard', { body: { card } }); A.toast('Cancelled — user notified'); A.scList(); } catch (e) { A.toast('Error: ' + (e.message || e), 'err'); }
   },
   async referVoid(uid) {
     if (!confirm('Void this referral? Its referrer loses the credit; unscratched cards that are no longer earned are removed (scratched cards stay).')) return;

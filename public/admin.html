@@ -456,6 +456,20 @@
         <b>Safety tip:</b> a FREE card (deposit = 0) can be farmed with fake accounts. A deposit requirement + "Deposit balance" keeps it safe. The amount is chosen by the server when the user scratches — it cannot be changed from the phone.
       </div>
     </div>
+    <div class="card"><div class="card-h">Send scratch card to a user</div>
+      <div class="muted" style="font-size:.74rem;margin-bottom:8px">The user gets a notification with a <b>Scratch now</b> button; the card also shows in Refer &amp; Earn. The amount is picked by the server when the user scratches.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="grid-column:1/3"><div class="lbl" style="margin-top:0">Player ID or UID</div><input class="inp" id="sc-user" placeholder="e.g. 8597053"></div>
+        <div><div class="lbl">Cards (1–10)</div><input class="inp" id="sc-count" type="number" min="1" max="10" value="1"></div>
+        <div><div class="lbl">Amount</div><select class="inp" id="sc-mode" onchange="A.scMode()"><option value="random">Random (min – max)</option><option value="fixed">Fixed</option></select></div>
+        <div id="sc-rnd" style="grid-column:1/3;display:flex;gap:10px"><div style="flex:1"><div class="lbl" style="margin-top:0">MIN ₹</div><input class="inp" id="sc-min" type="number" min="1" value="2"></div><div style="flex:1"><div class="lbl" style="margin-top:0">MAX ₹</div><input class="inp" id="sc-max" type="number" min="1" value="10"></div></div>
+        <div id="sc-fix" class="hidden" style="grid-column:1/3"><div class="lbl" style="margin-top:0">Fixed ₹</div><input class="inp" id="sc-fixed" type="number" min="1" value="5"></div>
+        <div style="grid-column:1/3"><div class="lbl" style="margin-top:0">Reward goes to</div><select class="inp" id="sc-to"><option value="deposit">Deposit balance</option><option value="withdraw">Withdrawable balance</option></select></div>
+        <div style="grid-column:1/3"><div class="lbl" style="margin-top:0">Message (optional)</div><input class="inp" id="sc-note" maxlength="80" placeholder="e.g. Sorry for the delay — here is a gift"></div>
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="A.scSend()"><i class="fa-solid fa-paper-plane"></i> Send scratch card</button>
+    </div>
+    <div class="card"><div class="card-h">Gift &amp; admin scratch cards <button class="btn btn-outline" style="float:right;padding:2px 9px;font-size:.7rem" onclick="A.scList()"><i class="fa-solid fa-rotate"></i></button></div><div id="sc-list"><span class="muted">Loading…</span></div></div>
     <div class="card"><div class="card-h">Recent referrals</div><div id="rf-list"><span class="muted">Loading…</span></div></div>
   </div>
 </div>
@@ -521,7 +535,10 @@
   </div>
   <div class="page-pad" style="padding-top:14px;">
     <div class="card" id="gf-form">
-      <div class="lbl" style="margin-top:0;">1 · Amount type</div>
+      <div class="lbl" style="margin-top:0;">0 · Reward type</div>
+      <div class="pm-toggle"><button class="pm add on" id="gf-r-inst" onclick="A.gfReward('instant')"><i class="fa-solid fa-bolt"></i> Instant</button><button class="pm add" id="gf-r-scr" onclick="A.gfReward('scratch')" style="--x:1"><i class="fa-solid fa-ticket"></i> Scratch card</button></div>
+      <div class="muted" id="gf-r-hint" style="margin:-4px 0 6px;font-size:.72rem;">Money is added to the wallet the moment the code is redeemed.</div>
+      <div class="lbl">1 · Amount type</div>
       <div class="pm-toggle"><button class="pm add on" id="gf-t-fix" onclick="A.gfType('fix')"><i class="fa-solid fa-equals"></i> Fixed</button><button class="pm add" id="gf-t-rnd" onclick="A.gfType('random')" style="--x:1"><i class="fa-solid fa-shuffle"></i> Random</button></div>
       <div id="gf-amt-fix"><div class="lbl">Amount ₹ (everyone gets this)</div><input class="inp" id="gf-fix" type="number" min="1" placeholder="e.g. 2"></div>
       <div id="gf-amt-rnd" class="hidden"><div style="display:flex;gap:10px;"><div style="flex:1;"><div class="lbl">Min ₹</div><input class="inp" id="gf-min" type="number" min="1" placeholder="1"></div><div style="flex:1;"><div class="lbl">Max ₹</div><input class="inp" id="gf-max" type="number" min="1" placeholder="5"></div></div><div class="muted" style="margin-top:-6px;">Each user gets a whole-rupee amount between min and max (e.g. 1, 3, 4, 5).</div></div>
