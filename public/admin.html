@@ -405,6 +405,22 @@
   </div>
   <div class="page-pad" style="padding-top:14px;">
     <div class="card">
+      <div class="card-h">Add / edit a top player <span class="muted" style="font-weight:600">(amount decides the rank)</span></div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input class="inp" id="lbm-find" placeholder="Player ID or app UID" style="margin:0;flex:1" onkeydown="if(event.key==='Enter')A.lbmFind()">
+        <button class="btn btn-outline" onclick="A.lbmFind()">Find</button>
+      </div>
+      <div id="lbm-found"></div>
+      <input class="inp" id="lbm-amt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Amount (₹)" style="margin:0 0 10px">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px;font-size:.85rem">
+        <label><input type="checkbox" id="lbm-sp-d"> Today</label>
+        <label><input type="checkbox" id="lbm-sp-w"> This week</label>
+        <label><input type="checkbox" id="lbm-sp-m"> This month</label>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="A.lbmSet()">Put on leaderboard</button>
+      <div class="muted" style="font-size:.72rem;margin-top:8px">This sets the exact amount on the boards you tick (the player is added if missing). Later wins are added on top of it. The monthly reward also follows the month board order.</div>
+    </div>
+    <div class="card">
       <div class="card-h">Board <span class="muted" style="font-weight:600" id="lbm-key"></span></div>
       <div style="display:flex;gap:8px;margin-bottom:10px;">
         <button class="btn btn-outline" id="lbm-p-d" onclick="A.lbmPeriod('d')" style="flex:1">Today</button>
@@ -412,11 +428,15 @@
         <button class="btn btn-outline" id="lbm-p-m" onclick="A.lbmPeriod('m')" style="flex:1">This month</button>
       </div>
       <div class="muted" style="font-size:.74rem;margin-bottom:10px">
-        <b>Remove</b> = deletes the person from the board shown (their next win adds them again).
+        <b>Edit ₹</b> = change the amount (rank changes by amount).
+        <b>Remove</b> = deletes the person from the board shown (their next win adds them again). Removed by mistake? Use <b>Restore</b> in &quot;Recently removed&quot;.
         <b>Hide</b> = test / admin account: removed from today, week &amp; month and <b>never shown again</b> (and never gets the monthly reward).
         <b>Blue tick</b> = ON/OFF (shown with a pink-purple name in the leaderboard, chat, games and rosters).
       </div>
       <div id="lbm-list"><span class="muted">Loading…</span></div>
+    </div>
+    <div class="card"><div class="card-h">Recently removed <span class="muted" style="font-weight:600">(restore a mistake)</span></div>
+      <div id="lbm-trash"><span class="muted">Nothing removed recently.</span></div>
     </div>
     <div class="card"><div class="card-h">Hidden accounts <span class="muted" style="font-weight:600">(never on the leaderboard)</span></div>
       <div id="lbm-hidden"><span class="muted">—</span></div>

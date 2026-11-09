@@ -29,3 +29,11 @@ Chat Manager mein **Message life (hours)** ka control hai (default 24h). Fampay 
 
 ## Files
 `app.py` routes · `admin_lite.py` sub-admin panel · `chatadmin.py` chat manager · `fampay_store.py` deposit pool · `jobs.py` reward job · `opsapi.py/keepalive.py/renderinfo.py/uptimerobot.py` status + revive · `public/` UI · `firestore.rules`
+
+---
+
+# Leaderboard manager (admin panel -> Leaderboard)
+* **Add / edit a top player**: find by Player ID or app UID, set an amount, tick Today / This week / This month. The top order follows the amount.
+* **Edit ₹** on any row changes that player's amount on the board shown.
+* **Recently removed**: Remove / Hide keep a copy, so a mistake can be restored with one tap (stored in `config/lbTrash`, only current boards).
+* Hidden accounts now show name + Player ID, with a **Show again** button.
