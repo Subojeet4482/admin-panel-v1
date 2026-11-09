@@ -129,9 +129,9 @@ def clean(v):
     return str(v)
 
 
-def notif(txn_or_batch, uref, title, msg):
+def notif(txn_or_batch, uref, title, msg, extra=None):
     txn_or_batch.set(uref.collection("notifications").document(),
-                     {"title": title, "message": msg, "date": today(), "timestamp": dt.datetime.now(dt.timezone.utc)})
+                     {"title": title, "message": msg, "date": today(), "timestamp": dt.datetime.now(dt.timezone.utc), **(extra or {})})
 
 
 def trx_doc(txn_or_batch, uref, title, amt_str, typ):
@@ -415,7 +415,7 @@ def trx_item(s):
     typ = "withdraw" if t.get("type") == "withdraw" else "deposit"
     ms = tsms(t)
     row = {k: t.get(k) for k in ("status", "amount", "method", "date", "trxId", "number", "accountName", "accountNumber",
-                                  "ifsc", "coin", "network", "walletAddress")}
+                                  "ifsc", "coin", "network", "walletAddress", "giftValue", "giftCode", "adminNote")}
     return {**row, "id": s.id, "uid": s.reference.parent.parent.id if s.reference.parent.parent else "?",
             "type": typ, "order": order_no(typ, s.id, ms), "ts": ms}
 
@@ -459,7 +459,7 @@ def _load_wallet(mode):
 
 
 @transactional
-def _wallet_txn(txn, tref, uref, action):
+def _wallet_txn(txn, tref, uref, action, code="", note=""):
     s = tref.get(transaction=txn)
     if not s.exists:
         raise ApiError("Transaction nahi mili", 404)
@@ -489,23 +489,34 @@ def _wallet_txn(txn, tref, uref, action):
             txn.update(tref, {"status": "success", **stamp})
             txn.set(uref, {"depositBalance": Increment(amt), "totalDeposited": Increment(amt)}, merge=True)
             notif(txn, uref, f"Deposit success: ₹{money(amt)}", f"Order {order} • ₹{money(amt)} added to your deposit balance.")
+        elif t.get("method") == "GIFTCARD":
+            if not code:
+                raise ApiError("Pehle gift code daalo")
+            txn.update(tref, {"status": "success", "giftCode": code, **({"adminNote": note} if note else {}), **stamp})
+            txn.set(uref, {"totalWithdrawn": Increment(amt)}, merge=True)
+            notif(txn, uref, f"Google Play gift code ready: ₹{money(amt)}",
+                  f"Order {order} • Your Google Play gift card of ₹{money(amt)} is ready. Copy the code below and redeem it in Google Play Store." + (f"\nNote: {note}" if note else ""),
+                  {"giftCode": code})
         else:
             txn.update(tref, {"status": "success", **stamp})
             txn.set(uref, {"totalWithdrawn": Increment(amt)}, merge=True)
             notif(txn, uref, f"Withdrawal success: ₹{money(amt)}", f"Order {order} • ₹{money(amt)} withdrawal approved. Funds will reach you shortly.")
     elif action == "reject":
-        txn.update(tref, {"status": "rejected", **stamp})
+        txn.update(tref, {"status": "rejected", **({"adminNote": note} if note else {}), **stamp})
         if dr is not None:
             txn.update(dref, {"status": "rejected", "rejectedAt": now_ms(), "verifiedBy": "admin"})
-        notif(txn, uref, f"{'Withdrawal' if typ == 'withdraw' else 'Deposit'} rejected: ₹{money(amt)}", f"Order {order} • Request rejected by admin. No refund issued.")
+        gp = t.get("method") == "GIFTCARD"
+        notif(txn, uref, f"{'Gift card request' if gp else 'Withdrawal' if typ == 'withdraw' else 'Deposit'} rejected: ₹{money(amt)}",
+              f"Order {order} • Request rejected by admin. No refund issued." + (f"\nNote: {note}" if note else ""))
     elif action == "refund":
         if typ != "withdraw":
             raise ApiError("Refund sirf withdrawal par hota hai")
         if st in ("refunded", "success"):
             raise ApiError("Isko refund nahi kar sakte")
-        txn.update(tref, {"status": "refunded", **stamp})
+        txn.update(tref, {"status": "refunded", **({"adminNote": note} if note else {}), **stamp})
         txn.set(uref, {"withdrawBalance": Increment(amt)}, merge=True)
-        notif(txn, uref, f"Withdrawal refunded: ₹{money(amt)}", f"Order {order} • ₹{money(amt)} returned to your withdrawal balance.")
+        notif(txn, uref, f"{'Gift card' if t.get('method') == 'GIFTCARD' else 'Withdrawal'} refunded: ₹{money(amt)}",
+              f"Order {order} • ₹{money(amt)} returned to your withdrawal balance." + (f"\nNote: {note}" if note else ""))
     else:
         raise ApiError("Unknown action")
     return "Done"
@@ -521,7 +532,9 @@ def wallet_process():
     db = get_db()
     action = d.get("action")
     tref = db.collection("users").document(uid).collection("transactions").document(tid)
-    msg = _wallet_txn(db.transaction(), tref, db.collection("users").document(uid), action)
+    code = str(d.get("code") or "").strip()[:200]
+    note = str(d.get("note") or "").strip()[:200]
+    msg = _wallet_txn(db.transaction(), tref, db.collection("users").document(uid), action, code, note)
     if action == "approve":
         # Deposit approve hote hi Fampay ke pending pool mein match dhoondo — mil jaye to woh entry
         # turant "successful history" mein move ho jaati hai (yahi reference+amount dobara kisi aur
@@ -1182,15 +1195,24 @@ function renderFin(){
     const row=(k,v,c)=>`<div class="fin-row"><span class="k">${k}</span><span class="v">${v}</span>${c?`<button class="copy-btn" onclick="copyText('${esc(c)}')"><i class="fa-regular fa-copy"></i></button>`:''}</div>`;
     let r=row('User',esc(t.uid.substring(0,14))+'…',t.uid);if(utr)r+=row('UTR / Tx',esc(utr),utr);
     if(wd){if(t.method==='BANK')r+=row('🏦 Bank',`${esc(t.accountName||'')}<br>A/C: ${esc(t.accountNumber||'')}<br>IFSC: ${esc(t.ifsc||'')}`,t.accountNumber||'');
+      else if(t.method==='GIFTCARD')r+=`<div class="fin-row" style="background:#ecfdf5;border-color:#a7f3d0;"><span class="k" style="color:#047857;">🎁 Google Play<br>Gift Card</span><span class="v" style="color:#047857;font-size:1rem;">₹${num(t.giftValue||t.amount)} ka code chahiye</span></div>`;
       else if(t.method==='CRYPTO')r+=row('₿ '+esc(t.coin||'Crypto')+'<br>'+esc(t.network||''),esc(t.walletAddress||''),t.walletAddress||'');
-      r+=`<div class="fin-row" style="background:#ecfdf5;border-color:#a7f3d0;"><span class="k" style="color:#047857;">User ko milega</span><span class="v" style="color:#047857;">₹${Math.max(0,amt-2).toFixed(2)} <span style="font-weight:600;">(₹2 fee ke baad)</span></span></div>`}
+      if(t.method!=='GIFTCARD')r+=`<div class="fin-row" style="background:#ecfdf5;border-color:#a7f3d0;"><span class="k" style="color:#047857;">User ko milega</span><span class="v" style="color:#047857;">₹${Math.max(0,amt-2).toFixed(2)} <span style="font-weight:600;">(₹2 fee ke baad)</span></span></div>`}
+    const gp=wd&&t.method==='GIFTCARD';
+    if(gp&&t.giftCode)r+=row('🔑 Code sent',esc(t.giftCode),t.giftCode);
+    if(t.adminNote)r+=row('📝 Note',esc(t.adminNote));
     const a=x=>`proc('${esc(t.uid)}','${esc(t.id)}','${x}')`,rf=`<button class="btn btn-outline" style="color:#f59e0b;border-color:#f59e0b;" onclick="${a('refund')}">↩ Refund</button>`;
-    let act='';if(st==='pending')act=`<div class="fin-actions"><button class="btn btn-success" onclick="${a('approve')}">✅ Accept</button><button class="btn btn-danger" onclick="${a('reject')}">❌ Reject</button>${wd?rf:''}</div>`;
-    else if(wd&&st==='rejected')act=`<div class="fin-actions">${rf}</div>`;
+    const noteIn=`<input type="text" id="fn-${esc(t.id)}" class="inp" placeholder="📝 Note (reject / refund pe user ko notification me jayega)" maxlength="200" autocomplete="off" style="margin:8px 0 0;width:100%;">`;
+    const codeIn=gp?`<input type="text" id="gc-${esc(t.id)}" class="inp" placeholder="🔑 Google Play gift code yahan daalo" autocomplete="off" spellcheck="false" style="margin:8px 0 0;width:100%;font-family:monospace;">`:'';
+    let act='';if(st==='pending')act=`${codeIn}${noteIn}<div class="fin-actions"><button class="btn btn-success" onclick="${a('approve')}">${gp?'✅ Success (Code bhejo)':'✅ Accept'}</button><button class="btn btn-danger" onclick="${a('reject')}">❌ Reject</button>${wd?rf:''}</div>`;
+    else if(wd&&st==='rejected')act=`${noteIn}<div class="fin-actions">${rf}</div>`;
     return `<div class="fin-card ${esc(st)}"><div class="fin-head"><div><div class="fin-order">${esc(t.order)}</div><div class="fin-date">${esc(t.method||t.type)} • ${esc(t.date||'')}</div></div>
       <div><div class="fin-amt" style="color:${wd?'var(--danger)':'var(--success)'};">${wd?'-':'+'}₹${amt}</div><div style="text-align:right;"><span class="fin-st ${esc(st)}">${esc(st)}</span></div></div></div>${r}${act}</div>`}).join('')}
-async function proc(uid,id,action){const L={approve:'ACCEPT (Success)',reject:'REJECT (No refund)',refund:'REFUND (Return money)'};if(!confirm(L[action]+'?'))return;
-  try{const r=await api('/api/wallet/process',{uid,id,action});toast(r.message||'Done!');loadFin()}catch(e){fail(e);loadFin()}}
+async function proc(uid,id,action){const L={approve:'ACCEPT (Success)',reject:'REJECT (No refund)',refund:'REFUND (Return money)'};
+  const ci=$('gc-'+id),ni=$('fn-'+id),code=ci?ci.value.trim():'',note=ni?ni.value.trim():'';
+  if(ci&&action==='approve'&&!code){toast('Pehle gift code daalo','err');ci.focus();return}
+  if(!confirm(L[action]+(ci&&action==='approve'?'\n\nCode: '+code:'')+'?'))return;
+  try{const r=await api('/api/wallet/process',{uid,id,action,code,note});toast(r.message||'Done!');loadFin()}catch(e){fail(e);loadFin()}}
 
 /* ---- users ---- */
 let allUsers=[];

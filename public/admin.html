@@ -705,6 +705,32 @@
     <input class="inp" id="s-support" placeholder="e.g. +91 9876543210">
 
     <div style="border-top:1px dashed var(--border);padding-top:16px;margin-bottom:4px;">
+      <div style="font-weight:800;color:var(--primary);margin-bottom:14px;font-size:0.92rem;"><i class="fa-solid fa-sliders"></i> Wallet Limits</div>
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;"><div class="lbl">Min Withdrawal ₹</div><input class="inp" id="s-min-wd" type="number" min="3" step="1" placeholder="10"></div>
+        <div style="flex:1;"><div class="lbl">Min Deposit ₹</div><input class="inp" id="s-min-dep" type="number" min="1" step="1" placeholder="5"></div>
+      </div>
+      <div style="font-size:0.7rem;color:var(--sub);margin:-4px 0 14px;">Default: Withdrawal ₹10, Deposit ₹5. Withdrawal minimum kam se kam ₹3 (₹2 fee ke baad kuch bachna chahiye).</div>
+    </div>
+
+    <div style="border-top:1px dashed var(--border);padding-top:16px;margin-bottom:4px;">
+      <div style="font-weight:800;color:var(--primary);margin-bottom:14px;font-size:0.92rem;"><i class="fa-solid fa-power-off"></i> Deposit / Withdrawal ON-OFF</div>
+      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;">
+        <label style="display:flex;align-items:center;gap:10px;font-weight:800;font-size:0.88rem;cursor:pointer;"><input type="checkbox" id="s-dep-on" style="width:18px;height:18px;accent-color:var(--success);"> 💰 Deposit <span style="font-weight:600;font-size:0.72rem;color:var(--sub);">(tick = ON)</span></label>
+        <input class="inp" id="s-dep-note" maxlength="200" style="margin:8px 0 0;" placeholder="Message jab OFF ho (user ko dikhega)">
+      </div>
+      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;">
+        <label style="display:flex;align-items:center;gap:10px;font-weight:800;font-size:0.88rem;cursor:pointer;"><input type="checkbox" id="s-wdupi-on" style="width:18px;height:18px;accent-color:var(--success);"> 📲 UPI Withdrawal <span style="font-weight:600;font-size:0.72rem;color:var(--sub);">(tick = ON)</span></label>
+        <input class="inp" id="s-wdupi-note" maxlength="200" style="margin:8px 0 0;" placeholder="Message jab OFF ho (user ko dikhega)">
+      </div>
+      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;">
+        <label style="display:flex;align-items:center;gap:10px;font-weight:800;font-size:0.88rem;cursor:pointer;"><input type="checkbox" id="s-wdgp-on" style="width:18px;height:18px;accent-color:var(--success);"> 🎁 Google Play Withdrawal <span style="font-weight:600;font-size:0.72rem;color:var(--sub);">(tick = ON)</span></label>
+        <input class="inp" id="s-wdgp-note" maxlength="200" style="margin:8px 0 0;" placeholder="Message jab OFF ho (user ko dikhega)">
+      </div>
+      <div style="font-size:0.7rem;color:var(--sub);margin:0 0 14px;">OFF karne par user ko "Disabled" dikhega aur yahan likha message dikhega. Message khali ho to default message dikhega.</div>
+    </div>
+
+    <div style="border-top:1px dashed var(--border);padding-top:16px;margin-bottom:4px;">
       <div style="font-weight:800;color:var(--primary);margin-bottom:14px;font-size:0.92rem;"><i class="fa-solid fa-indian-rupee-sign"></i> UPI Settings</div>
       <div class="lbl">UPI ID</div><input class="inp" id="s-upi" placeholder="yourname@upi">
       <div class="lbl">QR Code — Upload Photo</div>
@@ -718,12 +744,6 @@
       </div>
       <input type="file" id="qr-inp" accept="image/*" style="display:none;" onchange="A.selectQr(this)">
       <div id="qr-msg" style="font-size:0.75rem;font-weight:700;min-height:18px;margin-bottom:10px;"></div>
-    </div>
-
-    <div style="border-top:1px dashed var(--border);padding-top:16px;margin-bottom:4px;">
-      <div style="font-weight:800;color:#f59e0b;margin-bottom:14px;font-size:0.92rem;"><i class="fa-brands fa-bitcoin"></i> Crypto Deposit</div>
-      <div class="lbl">Coin Name (e.g. USDT TRC20)</div><input class="inp" id="s-coin" placeholder="USDT (TRC20)">
-      <div class="lbl">Wallet Address</div><input class="inp" id="s-addr" placeholder="Wallet address...">
     </div>
 
     <div style="border-top:1px dashed var(--border);padding-top:16px;margin-bottom:4px;">

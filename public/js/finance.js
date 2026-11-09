@@ -128,21 +128,30 @@ Object.assign(window.A, {
           rows += `<div class="fin-row"><span class="k">🏦 Bank</span><span class="v">${esc(t.accountName||'')}<br>A/C: ${esc(t.accountNumber||'')}<br>IFSC: ${esc(t.ifsc||'')}</span><button class="copy-btn" onclick="A.copyText('${esc(t.accountNumber||'')}')"><i class="fa-regular fa-copy"></i></button></div>`;
         } else if(t.method==='UPI'){
           rows += `<div class="fin-row" style="background:#eef2ff;"><span class="k">📲 UPI</span><span class="v">${esc(t.accountName||'')}<br>${esc(t.upiId||'')}</span><button class="copy-btn" onclick="A.copyText('${esc(t.upiId||'')}')"><i class="fa-regular fa-copy"></i></button></div>`;
+        } else if(t.method==='GIFTCARD'){
+          const gv = num(t.giftValue||t.amount);
+          rows += `<div class="fin-row" style="background:#ecfdf5;border-color:#a7f3d0;"><span class="k" style="color:#047857;">🎁 Google Play<br>Gift Card</span><span class="v" style="color:#047857;font-size:1rem;">₹${gv} ka code chahiye</span></div>`;
         } else if(t.method==='CRYPTO'){
           rows += `<div class="fin-row"><span class="k">₿ ${esc(t.coin||'Crypto')}<br>${esc(t.network||'')}</span><span class="v" style="font-size:0.68rem;">${esc(t.walletAddress||'')}</span><button class="copy-btn" onclick="A.copyText('${esc(t.walletAddress||'')}')"><i class="fa-regular fa-copy"></i></button></div>`;
         }
-        rows += `<div class="fin-row" style="background:#ecfdf5;border-color:#a7f3d0;"><span class="k" style="color:#047857;">User ko milega</span><span class="v" style="color:#047857;">₹${Math.max(0,amt-2).toFixed(2)} <span style="font-weight:600;">(₹2 fee ke baad)</span></span></div>`;
+        if(t.method!=='GIFTCARD') rows += `<div class="fin-row" style="background:#ecfdf5;border-color:#a7f3d0;"><span class="k" style="color:#047857;">User ko milega</span><span class="v" style="color:#047857;">₹${Math.max(0,amt-2).toFixed(2)} <span style="font-weight:600;">(₹2 fee ke baad)</span></span></div>`;
       }
+      if(type==='withdraw' && t.method==='GIFTCARD' && t.giftCode) rows += `<div class="fin-row" style="background:#eef2ff;"><span class="k">🔑 Code sent</span><span class="v" style="font-family:monospace;word-break:break-all;">${esc(t.giftCode)}</span><button class="copy-btn" onclick="A.copyText('${esc(t.giftCode)}')"><i class="fa-regular fa-copy"></i></button></div>`;
+      if(t.adminNote) rows += `<div class="fin-row"><span class="k">📝 Note</span><span class="v">${esc(t.adminNote)}</span></div>`;
+      const isGp = type==='withdraw' && t.method==='GIFTCARD';
+      const did = esc(t._docId);
       const a = (act)=>`A.processTrx('${esc(uid)}','${esc(t._docId)}','${type}','${esc(t.amount)}','${act}')`;
       let actions='';
       if(st==='pending'){
-        actions = `<div class="fin-actions">
-          <button class="btn btn-success" onclick="${a('approve')}">✅ Accept</button>
+        const codeBox = isGp ? `<input type="text" id="gc-code-${did}" class="inp" placeholder="🔑 Google Play gift code yahan daalo" autocomplete="off" autocapitalize="characters" spellcheck="false" style="margin:8px 0 0;width:100%;font-family:monospace;letter-spacing:.5px;">` : '';
+        const noteBox = `<input type="text" id="fin-note-${did}" class="inp" placeholder="📝 Note (reject / refund pe user ko notification me jayega)" maxlength="200" autocomplete="off" style="margin:8px 0 0;width:100%;">`;
+        actions = `${codeBox}${noteBox}<div class="fin-actions">
+          <button class="btn btn-success" onclick="${a('approve')}">${isGp?'✅ Success (Code bhejo)':'✅ Accept'}</button>
           <button class="btn btn-danger" onclick="${a('reject')}">❌ Reject</button>
           ${type==='withdraw'?`<button class="btn btn-outline" style="color:#f59e0b;border-color:#f59e0b;" onclick="${a('refund')}">↩ Refund</button>`:''}
         </div>`;
       } else if(type==='withdraw' && st==='rejected'){
-        actions = `<div class="fin-actions"><button class="btn btn-outline" style="color:#f59e0b;border-color:#f59e0b;" onclick="${a('refund')}">↩ Refund</button></div>`;
+        actions = `<input type="text" id="fin-note-${did}" class="inp" placeholder="📝 Refund note (user ko notification me jayega)" maxlength="200" autocomplete="off" style="margin:8px 0 0;width:100%;"><div class="fin-actions"><button class="btn btn-outline" style="color:#f59e0b;border-color:#f59e0b;" onclick="${a('refund')}">↩ Refund</button></div>`;
       }
       return `<div class="fin-card ${esc(st)}">
         <div class="fin-head">
@@ -156,7 +165,12 @@ Object.assign(window.A, {
 
   async processTrx(uid, trxId, type, amtRaw, action) {
     const labels={approve:'ACCEPT (Success)', reject:'REJECT (No refund)', refund:'REFUND (Return money)'};
-    if(!confirm(labels[action]+'?')) return;
+    const noteEl = document.getElementById('fin-note-'+trxId);
+    const codeEl = document.getElementById('gc-code-'+trxId);
+    const adminNote = noteEl ? noteEl.value.trim() : '';
+    const giftCode = codeEl ? codeEl.value.trim() : '';
+    if(codeEl && action==='approve' && !giftCode){ A.toast('Pehle gift code daalo','err'); codeEl.focus(); return; }
+    if(!confirm(labels[action]+(codeEl && action==='approve' ? '\n\nCode: '+giftCode : '')+'?')) return;
     try {
       const amt = parseFloat(amtRaw.toString().replace(/[^0-9.]/g,''));
       // Re-fetch the transaction so we know its current status (don't process twice)
@@ -164,6 +178,8 @@ Object.assign(window.A, {
       const trxSnap = await getDoc(trxRef);
       const trx = trxSnap.data()||{};
       const order = A._orderNum({type}, trxId, trx.createdAt);
+      const isGp = type==='withdraw' && trx.method==='GIFTCARD';
+      let extraNotif = {};
       let newStatus = trx.status;
       let notifTitle = '', notifMsg = '';
 
@@ -191,34 +207,43 @@ Object.assign(window.A, {
           notifTitle = `Deposit success: ₹${amt}`;
           notifMsg = `Order ${order} • ₹${amt} added to your deposit balance.`;
         } else {
-          await updateDoc(trxRef,{status:'success', orderNo:order, processedAt:Date.now()});
-          await setDoc(doc(db,'users',uid),{totalWithdrawn:increment(amt)},{merge:true});
-          notifTitle = `Withdrawal success: ₹${amt}`;
-          notifMsg = `Order ${order} • ₹${amt} withdrawal approved. Funds will reach you shortly.`;
+          if(isGp){
+            if(!giftCode){ A.toast('Pehle gift code daalo','err'); return; }
+            await updateDoc(trxRef,{status:'success', orderNo:order, processedAt:Date.now(), giftCode, ...(adminNote?{adminNote}:{})});
+            await setDoc(doc(db,'users',uid),{totalWithdrawn:increment(amt)},{merge:true});
+            notifTitle = `Google Play gift code ready: ₹${amt}`;
+            notifMsg = `Order ${order} • Your Google Play gift card of ₹${amt} is ready. Copy the code below and redeem it in Google Play Store.` + (adminNote ? `\nNote: ${adminNote}` : '');
+            extraNotif = { giftCode };
+          } else {
+            await updateDoc(trxRef,{status:'success', orderNo:order, processedAt:Date.now()});
+            await setDoc(doc(db,'users',uid),{totalWithdrawn:increment(amt)},{merge:true});
+            notifTitle = `Withdrawal success: ₹${amt}`;
+            notifMsg = `Order ${order} • ₹${amt} withdrawal approved. Funds will reach you shortly.`;
+          }
         }
       } else if(action==='reject'){
         if(trx.status!=='pending'){ A.toast('Already processed','err'); return; }
         newStatus = 'rejected';
-        await updateDoc(trxRef,{status:'rejected', orderNo:order, processedAt:Date.now()});
+        await updateDoc(trxRef,{status:'rejected', orderNo:order, processedAt:Date.now(), ...(adminNote?{adminNote}:{})});
         if(type==='deposit'){
           const utr = trx.trxId || '';
           if(utr){
             try { await updateDoc(doc(db,'deposit_requests',utr),{status:'rejected', rejectedAt:Date.now(), verifiedBy:'admin'}); } catch(_){}
           }
         }
-        notifTitle = type==='withdraw' ? `Withdrawal rejected: ₹${amt}` : `Deposit rejected: ₹${amt}`;
-        notifMsg = `Order ${order} • Request rejected by admin. No refund issued.`;
+        notifTitle = isGp ? `Gift card request rejected: ₹${amt}` : type==='withdraw' ? `Withdrawal rejected: ₹${amt}` : `Deposit rejected: ₹${amt}`;
+        notifMsg = `Order ${order} • Request rejected by admin. No refund issued.` + (adminNote ? `\nNote: ${adminNote}` : '');
       } else if(action==='refund'){
         if(type!=='withdraw'){ A.toast('Refund only applies to withdrawals','err'); return; }
         if(trx.status==='refunded'||trx.status==='success'){ A.toast('Cannot refund this','err'); return; }
-        await updateDoc(trxRef,{status:'refunded', orderNo:order, processedAt:Date.now()});
+        await updateDoc(trxRef,{status:'refunded', orderNo:order, processedAt:Date.now(), ...(adminNote?{adminNote}:{})});
         await setDoc(doc(db,'users',uid),{withdrawBalance:increment(amt)},{merge:true});
-        notifTitle = `Withdrawal refunded: ₹${amt}`;
-        notifMsg = `Order ${order} • ₹${amt} returned to your withdrawal balance.`;
+        notifTitle = isGp ? `Gift card refunded: ₹${amt}` : `Withdrawal refunded: ₹${amt}`;
+        notifMsg = `Order ${order} • ₹${amt} returned to your withdrawal balance.` + (adminNote ? `\nNote: ${adminNote}` : '');
       }
 
       if(notifTitle){
-        await addDoc(collection(db,'users',uid,'notifications'),{title:notifTitle, message:notifMsg, date:new Date().toLocaleDateString(), timestamp:new Date()});
+        await addDoc(collection(db,'users',uid,'notifications'),{title:notifTitle, message:notifMsg, date:new Date().toLocaleDateString(), timestamp:new Date(), ...extraNotif});
       }
       A.toast('Done!');
       if(A._finStatus==='all') A._fetchAllFin();

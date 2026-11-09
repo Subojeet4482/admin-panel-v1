@@ -221,8 +221,12 @@ Object.assign(window.A, {
       document.getElementById('s-notice').value = d.notice||'';
       document.getElementById('s-support').value = d.supportNumber||'';
       document.getElementById('s-upi').value = d.upi||'';
-      document.getElementById('s-coin').value = d.cryptoCoin||'';
-      document.getElementById('s-addr').value = d.cryptoAddr||'';
+      document.getElementById('s-min-wd').value = d.minWithdraw!=null ? d.minWithdraw : 10;
+      document.getElementById('s-min-dep').value = d.minDeposit!=null ? d.minDeposit : 5;
+      [['dep','depositEnabled','depositNote'],['wdupi','wdUpiEnabled','wdUpiNote'],['wdgp','wdGpEnabled','wdGpNote']].forEach(([k,on,nt])=>{
+        document.getElementById('s-'+k+'-on').checked = d[on] !== false;
+        document.getElementById('s-'+k+'-note').value = d[nt] || '';
+      });
       document.getElementById('s-wa-name').value = d.whatsappName||'';
       document.getElementById('s-wa-link').value = d.whatsappLink||d.whatsappNumber||'';
       document.getElementById('s-tg-name').value = d.telegramName||'';
@@ -239,6 +243,10 @@ Object.assign(window.A, {
   async saveSettings() {
     try {
       const existing = (await getDoc(doc(db,'config','banner'))).data() || {};
+      const minWd = parseFloat(document.getElementById('s-min-wd').value);
+      const minDep = parseFloat(document.getElementById('s-min-dep').value);
+      if(isNaN(minWd) || minWd < 3){ A.toast('Min Withdrawal kam se kam ₹3 hona chahiye','err'); return; }
+      if(isNaN(minDep) || minDep < 1){ A.toast('Min Deposit kam se kam ₹1 hona chahiye','err'); return; }
       const banners = Array.from(document.querySelectorAll('#banner-list .banner-inp'))
         .map(i => i.value.trim()).filter(Boolean);
       const data = {
@@ -248,13 +256,20 @@ Object.assign(window.A, {
         notice: document.getElementById('s-notice').value,
         supportNumber: document.getElementById('s-support').value,
         upi: document.getElementById('s-upi').value,
-        cryptoCoin: document.getElementById('s-coin').value,
-        cryptoAddr: document.getElementById('s-addr').value,
+        minWithdraw: minWd,
+        minDeposit: minDep,
+        depositEnabled: document.getElementById('s-dep-on').checked,
+        depositNote: document.getElementById('s-dep-note').value.trim(),
+        wdUpiEnabled: document.getElementById('s-wdupi-on').checked,
+        wdUpiNote: document.getElementById('s-wdupi-note').value.trim(),
+        wdGpEnabled: document.getElementById('s-wdgp-on').checked,
+        wdGpNote: document.getElementById('s-wdgp-note').value.trim(),
         whatsappName: document.getElementById('s-wa-name').value.trim(),
         whatsappLink: document.getElementById('s-wa-link').value.trim(),
         telegramName: document.getElementById('s-tg-name').value.trim(),
         telegramLink: document.getElementById('s-tg-link').value.trim(),
       };
+      delete data.cryptoCoin; delete data.cryptoAddr;   // crypto deposit removed
       if(_qrB64) data.qrUrl = _qrB64;
       await setDoc(doc(db,'config','banner'), data);
       _logoB64 = ''; _qrB64 = '';

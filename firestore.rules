@@ -13,6 +13,10 @@ service cloud.firestore {
 
     function isMe(u) { return signedIn() && request.auth.uid == u; }
 
+    // Min withdrawal set by the admin (Settings -> Min Withdrawal). Default Rs 10.
+    function minWd()       { return get(/databases/$(database)/documents/config/banner).data.get('minWithdraw', 10); }
+    // Admin switches (config/banner): depositEnabled, wdUpiEnabled, wdGpEnabled. Missing = ON.
+    function cfgOn(k)      { return get(/databases/$(database)/documents/config/banner).data.get(k, true) != false; }
     function userPath(u)   { return /databases/$(database)/documents/users/$(u); }
     function depReqPath(u) { return /databases/$(database)/documents/deposit_requests/$(u); }
     function fampayPath(u) { return /databases/$(database)/documents/fampay_deposits/$(u); }
@@ -155,7 +159,7 @@ service cloud.firestore {
 
         function validTrxCreate(uid, t) {
           return (t.type == 'game' && t.status == 'success')
-              || (t.type == 'deposit' && t.status == 'pending' && t.get('method', '') in ['UPI', 'CRYPTO'])
+              || (t.type == 'deposit' && t.status == 'pending' && t.get('method', '') == 'UPI' && cfgOn('depositEnabled'))
               || (t.type == 'withdraw' && t.status == 'pending' && validWithdraw(uid, t))
               || (t.type == 'deposit' && t.status == 'success' && t.get('kind', '') == 'gift'
                   && existsAfter(giftRedPath(t.giftHash, uid))
@@ -167,7 +171,8 @@ service cloud.firestore {
           let amt = float(t.amount.split('₹')[1]);
           let before = get(userPath(uid)).data.get('withdrawBalance', 0);
           let after = getAfter(userPath(uid)).data.get('withdrawBalance', 0);
-          return notBanned() && amt >= 20 && (before - after) >= (amt - 0.01);
+          return notBanned() && amt >= minWd()
+              && ((t.get('method', '') == 'UPI' && cfgOn('wdUpiEnabled')) || (t.get('method', '') == 'GIFTCARD' && cfgOn('wdGpEnabled'))) && (before - after) >= (amt - 0.01);
         }
 
         function validDepositTrxUpdate() {
@@ -263,7 +268,7 @@ service cloud.firestore {
       allow get: if signedIn() && (resource == null || resource.data.uid == request.auth.uid);
       allow list: if signedIn() && resource.data.uid == request.auth.uid;
 
-      allow create: if signedIn() && notBanned()
+      allow create: if signedIn() && notBanned() && cfgOn('depositEnabled')
         && request.resource.data.keys().hasOnly(['utr','amount','uid','name','status','createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.utr == utr
