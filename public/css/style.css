@@ -327,6 +327,12 @@ body{background:radial-gradient(900px 320px at 50% -80px,#e0e7ff 0,transparent 6
 .ls-switch2{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:.8rem;font-weight:700;} .ls-switch2 input{display:none;}
 .ls-switch2 i{width:42px;height:24px;border-radius:20px;background:#cbd5e1;position:relative;transition:.3s;flex:none;} .ls-switch2 i::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.3s cubic-bezier(.34,1.56,.64,1);box-shadow:0 2px 4px rgba(0,0,0,.2);}
 .ls-switch2 input:checked + i{background:#10b981;} .ls-switch2 input:checked + i::after{left:21px;}
+/* Settings -> Add Money / Withdrawal ON-OFF: note box sirf OFF hone par dikhta hai */
+.onoff-card{border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;background:#fff;}
+.onoff-card .ls-switch2{font-size:.88rem;font-weight:800;}
+.onoff-st{font-style:normal;font-size:.66rem;font-weight:800;padding:2px 8px;border-radius:20px;margin-left:6px;vertical-align:middle;}
+.onoff-st.on{background:#dcfce7;color:#15803d;} .onoff-st.off{background:#fee2e2;color:#b91c1c;}
+.onoff-note{display:none;margin-top:10px;} .onoff-note.show{display:block;} .onoff-note .inp{margin:0;}
 .tg-card{background:linear-gradient(135deg,#e0f2fe,#eef2ff);} .tg-top{display:flex;align-items:center;gap:12px;margin-bottom:12px;} .tg-top b{display:block;} .tg-top small{display:block;font-size:.7rem;color:var(--sub);}
 .tg-logo{width:44px;height:44px;border-radius:14px;background:#229ed9;color:#fff;display:flex;align-items:center;justify-content:center;font-size:1.6rem;animation:giftFloat 3s ease-in-out infinite;}
 .tg-dot{width:11px;height:11px;border-radius:50%;background:#94a3b8;} .tg-dot.on{background:#10b981;animation:lsPulse 1.6s infinite;}

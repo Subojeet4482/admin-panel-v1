@@ -714,20 +714,29 @@
     </div>
 
     <div style="border-top:1px dashed var(--border);padding-top:16px;margin-bottom:4px;">
-      <div style="font-weight:800;color:var(--primary);margin-bottom:14px;font-size:0.92rem;"><i class="fa-solid fa-power-off"></i> Deposit / Withdrawal ON-OFF</div>
-      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;">
-        <label style="display:flex;align-items:center;gap:10px;font-weight:800;font-size:0.88rem;cursor:pointer;"><input type="checkbox" id="s-dep-on" style="width:18px;height:18px;accent-color:var(--success);"> 💰 Deposit <span style="font-weight:600;font-size:0.72rem;color:var(--sub);">(tick = ON)</span></label>
-        <input class="inp" id="s-dep-note" maxlength="200" style="margin:8px 0 0;" placeholder="Message jab OFF ho (user ko dikhega)">
+      <div style="font-weight:800;color:var(--primary);margin-bottom:6px;font-size:0.92rem;"><i class="fa-solid fa-power-off"></i> Add Money / Withdrawal — ON · OFF</div>
+      <div style="font-size:0.72rem;color:var(--sub);margin-bottom:12px;">Switch <b>OFF</b> karte hi note ka box khulega. User jab <b>Add Money</b> ya <b>Withdraw</b> dabayega to yahi note dikhega. Note khali chhodo to default message dikhega.</div>
+
+      <div class="onoff-card">
+        <label class="ls-switch2"><input type="checkbox" id="s-dep-on" onchange="A.onoffSync()"><i></i><span>💰 Add Money (Deposit) <em class="onoff-st" id="s-dep-st"></em></span></label>
+        <div class="onoff-note" id="s-dep-wrap"><input class="inp" id="s-dep-note" maxlength="200" placeholder="Note — user Add Money dabayega to ye dikhega"></div>
       </div>
-      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;">
-        <label style="display:flex;align-items:center;gap:10px;font-weight:800;font-size:0.88rem;cursor:pointer;"><input type="checkbox" id="s-wdupi-on" style="width:18px;height:18px;accent-color:var(--success);"> 📲 UPI Withdrawal <span style="font-weight:600;font-size:0.72rem;color:var(--sub);">(tick = ON)</span></label>
-        <input class="inp" id="s-wdupi-note" maxlength="200" style="margin:8px 0 0;" placeholder="Message jab OFF ho (user ko dikhega)">
+
+      <div class="onoff-card">
+        <label class="ls-switch2"><input type="checkbox" id="s-wd-on" onchange="A.onoffSync()"><i></i><span>💸 Withdrawal — sab methods <em class="onoff-st" id="s-wd-st"></em></span></label>
+        <div class="onoff-note" id="s-wd-wrap"><input class="inp" id="s-wd-note" maxlength="200" placeholder="Note — user Withdraw dabayega to ye dikhega (UPI + Google Play dono)"></div>
       </div>
-      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;">
-        <label style="display:flex;align-items:center;gap:10px;font-weight:800;font-size:0.88rem;cursor:pointer;"><input type="checkbox" id="s-wdgp-on" style="width:18px;height:18px;accent-color:var(--success);"> 🎁 Google Play Withdrawal <span style="font-weight:600;font-size:0.72rem;color:var(--sub);">(tick = ON)</span></label>
-        <input class="inp" id="s-wdgp-note" maxlength="200" style="margin:8px 0 0;" placeholder="Message jab OFF ho (user ko dikhega)">
+
+      <div style="font-size:0.7rem;font-weight:800;color:var(--sub);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.4px;">Sirf ek method band karna ho (optional)</div>
+      <div class="onoff-card">
+        <label class="ls-switch2"><input type="checkbox" id="s-wdupi-on" onchange="A.onoffSync()"><i></i><span>📲 UPI Withdrawal <em class="onoff-st" id="s-wdupi-st"></em></span></label>
+        <div class="onoff-note" id="s-wdupi-wrap"><input class="inp" id="s-wdupi-note" maxlength="200" placeholder="Note — UPI withdrawal ke liye"></div>
       </div>
-      <div style="font-size:0.7rem;color:var(--sub);margin:0 0 14px;">OFF karne par user ko "Disabled" dikhega aur yahan likha message dikhega. Message khali ho to default message dikhega.</div>
+      <div class="onoff-card">
+        <label class="ls-switch2"><input type="checkbox" id="s-wdgp-on" onchange="A.onoffSync()"><i></i><span>🎁 Google Play Withdrawal <em class="onoff-st" id="s-wdgp-st"></em></span></label>
+        <div class="onoff-note" id="s-wdgp-wrap"><input class="inp" id="s-wdgp-note" maxlength="200" placeholder="Note — Google Play withdrawal ke liye"></div>
+      </div>
+      <div style="font-size:0.7rem;color:var(--sub);margin:0 0 14px;">Withdrawal (sab methods) OFF ho to UPI aur Google Play dono band — us waqt upar wala note dikhta hai. Alag-alag method wale switch sirf tab kaam aate hain jab sab-methods wala ON ho.</div>
     </div>
 
     <div style="border-top:1px dashed var(--border);padding-top:16px;margin-bottom:4px;">

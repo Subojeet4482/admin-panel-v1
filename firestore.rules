@@ -15,7 +15,7 @@ service cloud.firestore {
 
     // Min withdrawal set by the admin (Settings -> Min Withdrawal). Default Rs 10.
     function minWd()       { return get(/databases/$(database)/documents/config/banner).data.get('minWithdraw', 10); }
-    // Admin switches (config/banner): depositEnabled, wdUpiEnabled, wdGpEnabled. Missing = ON.
+    // Admin switches (config/banner): depositEnabled, withdrawEnabled (all withdrawals), wdUpiEnabled, wdGpEnabled. Missing = ON.
     function cfgOn(k)      { return get(/databases/$(database)/documents/config/banner).data.get(k, true) != false; }
     function userPath(u)   { return /databases/$(database)/documents/users/$(u); }
     function depReqPath(u) { return /databases/$(database)/documents/deposit_requests/$(u); }
@@ -171,7 +171,7 @@ service cloud.firestore {
           let amt = float(t.amount.split('₹')[1]);
           let before = get(userPath(uid)).data.get('withdrawBalance', 0);
           let after = getAfter(userPath(uid)).data.get('withdrawBalance', 0);
-          return notBanned() && amt >= minWd()
+          return notBanned() && amt >= minWd() && cfgOn('withdrawEnabled')
               && ((t.get('method', '') == 'UPI' && cfgOn('wdUpiEnabled')) || (t.get('method', '') == 'GIFTCARD' && cfgOn('wdGpEnabled'))) && (before - after) >= (amt - 0.01);
         }
 

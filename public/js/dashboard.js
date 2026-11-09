@@ -209,6 +209,18 @@ Object.assign(window.A, {
   removeBannerRow(btn) { btn.parentElement.remove(); },
 
   /* ---- SETTINGS ---- */
+  // Add Money / Withdrawal switches: [id-key, config/banner ON field, config/banner note field]
+  _ONOFF: [['dep','depositEnabled','depositNote'],['wd','withdrawEnabled','withdrawNote'],['wdupi','wdUpiEnabled','wdUpiNote'],['wdgp','wdGpEnabled','wdGpNote']],
+  // ON/OFF label badal do + note ka box sirf OFF par kholo
+  onoffSync() {
+    A._ONOFF.forEach(([k]) => {
+      const on = document.getElementById('s-'+k+'-on').checked;
+      const st = document.getElementById('s-'+k+'-st');
+      st.textContent = on ? 'ON' : 'OFF';
+      st.className = 'onoff-st ' + (on ? 'on' : 'off');
+      document.getElementById('s-'+k+'-wrap').classList.toggle('show', !on);
+    });
+  },
   async showSettingsModal() {
     _logoB64 = ''; _qrB64 = '';
     document.getElementById('qr-img').style.display='none';
@@ -223,10 +235,11 @@ Object.assign(window.A, {
       document.getElementById('s-upi').value = d.upi||'';
       document.getElementById('s-min-wd').value = d.minWithdraw!=null ? d.minWithdraw : 10;
       document.getElementById('s-min-dep').value = d.minDeposit!=null ? d.minDeposit : 5;
-      [['dep','depositEnabled','depositNote'],['wdupi','wdUpiEnabled','wdUpiNote'],['wdgp','wdGpEnabled','wdGpNote']].forEach(([k,on,nt])=>{
+      A._ONOFF.forEach(([k,on,nt])=>{
         document.getElementById('s-'+k+'-on').checked = d[on] !== false;
         document.getElementById('s-'+k+'-note').value = d[nt] || '';
       });
+      A.onoffSync();
       document.getElementById('s-wa-name').value = d.whatsappName||'';
       document.getElementById('s-wa-link').value = d.whatsappLink||d.whatsappNumber||'';
       document.getElementById('s-tg-name').value = d.telegramName||'';
@@ -260,6 +273,8 @@ Object.assign(window.A, {
         minDeposit: minDep,
         depositEnabled: document.getElementById('s-dep-on').checked,
         depositNote: document.getElementById('s-dep-note').value.trim(),
+        withdrawEnabled: document.getElementById('s-wd-on').checked,
+        withdrawNote: document.getElementById('s-wd-note').value.trim(),
         wdUpiEnabled: document.getElementById('s-wdupi-on').checked,
         wdUpiNote: document.getElementById('s-wdupi-note').value.trim(),
         wdGpEnabled: document.getElementById('s-wdgp-on').checked,
