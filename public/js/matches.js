@@ -486,7 +486,8 @@ Object.assign(window.A, {
         places[k] = { t: 'card', mode: c.mode, min: c.min, max: c.max, diff: !!pl.diff }; if (k !== 'R' && k !== 'K') prizes[k] = 0;
       } else places[k] = { t: 'none' };
     }
-    return { rewards: { places, def: def || undefined, to: S.to }, prizes, pool, perKill };
+    const rewards = { places, to: S.to }; if (def) rewards.def = def; // Firestore rejects undefined
+    return { rewards, prizes, pool, perKill };
   },
   // at result time: what does place k get? (old matches without a plan = coin for ranks, nothing for the rest)
   _rwPlace(m, k) {
