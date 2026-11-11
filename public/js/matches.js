@@ -353,7 +353,7 @@ Object.assign(window.A, {
       <button class="btn btn-outline" onclick="A.savePrizeTime()"><i class="fa-solid fa-clock"></i> Save</button></div>`;
     if (m.paid) {
       const w = (m.winners || []).map(x => `<div style="margin-top:6px;">${(RANKS[x.rank] || ['🏅'])[0]} <b>${A.esc((x.names || []).join(', '))}</b>${x.amount ? ' — ₹' + x.amount : ''}</div>`).join('');
-      box.innerHTML = `<div class="done-banner"><div style="font-weight:800;">✅ Prizes already paid</div>${w}</div>`;
+      box.innerHTML = `<div class="done-banner"><div style="font-weight:800;">✅ Prizes already paid</div>${w}${m.scratchCards ? `<div style="margin-top:8px;color:#7e22ce;font-weight:700;">🎟 ${m.scratchCards} scratch card(s) sent</div>` : ''}</div>`;
       return;
     }
     if (!players.length) { box.innerHTML = '<div class="res-box"><div class="res-note">Result options will appear after players join.</div></div>'; return; }
@@ -367,6 +367,7 @@ Object.assign(window.A, {
           <input type="number" min="0" placeholder="Kills" class="inp" style="width:80px;margin:0;" data-uid="${p.uid}" data-name="${A.esc(p.appName || 'User')}" data-kill>
         </div>`).join('')}
         ${prizeTimeRow}
+        ${A._scBox(m, pm)}
         <button class="btn btn-success btn-full" style="margin-top:12px;" onclick="A.creditKills()"><i class="fa-solid fa-coins"></i> Calculate & Credit All</button></div>`;
     } else {
       const n = rankCount(pm), opts = A._winnerOptions(m), team = (m.teamSize || 1) > 1;
@@ -385,6 +386,7 @@ Object.assign(window.A, {
       h = `<div class="res-box"><h4>🏆 Select Winners</h4>
         <div class="res-note">${team ? 'The whole team gets the prize — the amount is divided equally between its members.' : 'Only registered players of this match can be selected.'}</div>
         ${rows}${prizeTimeRow}
+        ${A._scBox(m, pm)}
         <button class="btn btn-success btn-full" style="margin-top:12px;" onclick="A.distributeRanks()"><i class="fa-solid fa-trophy"></i> Confirm & Credit Winners</button></div>`;
     }
     h += `<div class="res-box" style="margin-top:12px;background:#f8fafc;border:1px dashed var(--border);">
@@ -394,6 +396,77 @@ Object.assign(window.A, {
       <button class="btn btn-outline btn-full" onclick="A.completeNoPayout()"><i class="fa-solid fa-flag-checkered"></i> Mark Completed</button></div>`;
     box.innerHTML = h;
   },
+  /* ================= Scratch-card rewards for match results ================= */
+  _scRow(key, label, auto) {
+    return `<div class="rank-row" style="margin-bottom:8px;">
+      <div class="rank-head" style="font-size:.82rem;">${label}</div>
+      <select class="inp" id="sc-m${key}" onchange="A.scMode('${key}')" style="background:#fff;margin-bottom:6px;">
+        <option value="none">No scratch card</option>
+        <option value="fixed">Fixed amount ₹</option>
+        <option value="random">Random ₹ min – max</option>
+        ${auto ? '<option value="auto">Auto (small random, by entry fee)</option>' : ''}
+      </select>
+      <div id="sc-f${key}" style="display:none;"><input class="inp" id="sc-fx${key}" type="number" min="1" placeholder="Fixed ₹" style="background:#fff;"></div>
+      <div id="sc-r${key}" style="display:none;gap:8px;">
+        <input class="inp" id="sc-lo${key}" type="number" min="1" placeholder="Min ₹" style="background:#fff;flex:1;">
+        <input class="inp" id="sc-hi${key}" type="number" min="1" placeholder="Max ₹" style="background:#fff;flex:1;">
+      </div>
+      <div class="res-note" id="sc-a${key}" style="display:none;"></div>
+    </div>`;
+  },
+  _scBox(m, pm) {
+    const n = pm === 'per_kill' ? 0 : rankCount(pm), team = (m.teamSize || 1) > 1;
+    let rows = '';
+    for (let i = 1; i <= n; i++) rows += A._scRow(String(i), `${RANKS[i][0]} ${pm === 'match_win' ? (team ? 'Winning Team' : 'Match Winner') : RANKS[i][1] + ' Place'} — scratch card`, false);
+    rows += A._scRow('R', n ? '👥 Everyone else (rest of the players)' : '👥 All players', true);
+    return `<div class="res-box" style="margin-top:12px;background:#faf5ff;border:1px solid #e9d5ff;">
+      <h4 style="color:#7e22ce;">🎟 Scratch Card Rewards <small style="font-weight:600;">(optional, on top of cash)</small></h4>
+      <div class="res-note">Set each place separately. Money is added only when the player scratches the card. Team members each get their own card.</div>
+      ${rows}
+      <div class="lbl">Scratch money goes to</div>
+      <select class="inp" id="sc-to" style="background:#fff;"><option value="deposit">Deposit balance</option><option value="withdraw">Withdrawal balance</option></select>
+    </div>`;
+  },
+  scMode(k) {
+    const v = document.getElementById('sc-m' + k).value, g = (id) => document.getElementById(id + k);
+    g('sc-f').style.display = v === 'fixed' ? 'block' : 'none';
+    g('sc-r').style.display = v === 'random' ? 'flex' : 'none';
+    const a = g('sc-a'), fee = Number((A._M || {}).fee) || 0;
+    a.style.display = v === 'auto' ? 'block' : 'none';
+    if (v === 'auto') a.textContent = `Auto: each player gets a random ₹1 – ₹${Math.max(2, Math.round(fee / 2))} card (half of the ₹${fee} entry fee, min ₹2).`;
+  },
+  // read one scratch row -> null (none) | {min,max} | {err}
+  _scRead(k, fee) {
+    const sel = document.getElementById('sc-m' + k); if (!sel || sel.value === 'none') return null;
+    const num = (id) => Math.floor(Number(document.getElementById(id + k).value) || 0);
+    if (sel.value === 'fixed') { const v = num('sc-fx'); return v >= 1 ? { min: v, max: v } : { err: 'Enter the fixed scratch amount' }; }
+    if (sel.value === 'random') { const lo = num('sc-lo'), hi = num('sc-hi'); return (lo >= 1 && hi >= lo) ? { min: lo, max: hi } : { err: 'Scratch card: Min must be ≥ 1 and Max ≥ Min' }; }
+    return { min: 1, max: Math.max(2, Math.round(fee / 2)) };
+  },
+  // entries = [{rank, members}] (empty for per-kill). Returns {plan, to} or {err}
+  _scCollect(m, entries) {
+    const fee = Number(m.fee) || 0, plan = [], used = new Set();
+    for (const e of entries) {
+      const c = A._scRead(String(e.rank), fee); if (c && c.err) return c;
+      e.members.forEach(p => used.add(p.uid));
+      if (c) e.members.forEach(p => plan.push({ uid: p.uid, name: p.appName || 'User', min: c.min, max: c.max, label: `${RANKS[e.rank][1]} place` }));
+    }
+    const r = A._scRead('R', fee); if (r && r.err) return r;
+    if (r) live(m).forEach(p => { if (!used.has(p.uid)) { used.add(p.uid); plan.push({ uid: p.uid, name: p.appName || 'User', min: r.min, max: r.max, label: entries.length ? 'Participation' : 'Match reward' }); } });
+    const to = (document.getElementById('sc-to') || {}).value || 'deposit';
+    return { plan, to };
+  },
+  _scSummary(sc) { return sc.plan.length ? '\n\n🎟 Scratch cards: ' + sc.plan.length + ' player(s)\n' + sc.plan.slice(0, 12).map(x => `${x.label}: ${x.name} — ₹${x.min}${x.max > x.min ? '–' + x.max : ''}`).join('\n') + (sc.plan.length > 12 ? '\n…' : '') : ''; },
+  // after the cash is paid: create the cards on the server. Returns the toast text.
+  async _scIssue(m, sc) {
+    if (!sc.plan.length) return '';
+    try {
+      const r = await A.api('/api/ref/admin/matchcards', { body: { matchId: m.id, title: m.title || '', creditTo: sc.to, cards: sc.plan } });
+      await updateDoc(doc(db, 'matches', m.id), { scratchCards: r.issued || 0 });
+      return ` + ${r.issued} scratch card(s) sent`;
+    } catch (e) { A._scFail = 'Cash credited, but scratch cards FAILED: ' + (e.message || e) + ' — send them from the Scratch Cards panel.'; return ''; }
+  },
+
   updateSplit(i) {
     const m = A._M, el = document.getElementById('rk-s' + i); if (!el) return;
     const w = A._resolveWinner(m, document.getElementById('rk-w' + i).value);
@@ -461,7 +534,8 @@ Object.assign(window.A, {
       entries.push({ rank: i, label: w.label, members: w.members, amount: amt, per: r2(amt / w.members.length) });
     }
     const sum = entries.map(e => `${RANKS[e.rank][1]}: ${e.label} — ₹${e.amount}${e.members.length > 1 ? ` (₹${e.per} × ${e.members.length})` : ''}`).join('\n');
-    if (!confirm(`Credit these prizes?\n\n${sum}`)) return;
+    const sc = A._scCollect(m, entries); if (sc.err) return A.toast(sc.err, 'err');
+    if (!confirm(`Credit these prizes?\n\n${sum}${A._scSummary(sc)}`)) return;
     try {
       const writes = [], winMap = {};
       for (const e of entries) for (const p of e.members) {
@@ -479,7 +553,8 @@ Object.assign(window.A, {
         winnerUid: first ? first.members[0].uid : '', winnerUids: first ? first.members.map(p => p.uid) : [],
         paidAt: Date.now()
       });
-      A.toast('Winners credited!'); A.closeModal('m-players'); A.loadMatches();
+      A._scFail = ''; const scMsg = await A._scIssue(m, sc);
+      A.toast(A._scFail || ('Winners credited!' + scMsg), A._scFail ? 'err' : undefined); A.closeModal('m-players'); A.loadMatches();
     } catch (e) { A.toast('Error: ' + e.message, 'err'); }
   },
 
@@ -495,7 +570,8 @@ Object.assign(window.A, {
       if (kills > 0) credits.push({ uid: inp.dataset.uid, name: inp.dataset.name, kills, amt: r2(kills * perKill) });
     });
     if (!credits.length) return A.toast('Enter kills for at least one player', 'err');
-    if (!confirm('Credit these rewards?\n' + credits.map(c => `${c.name}: ${c.kills} kills × ₹${perKill} = ₹${c.amt}`).join('\n'))) return;
+    const sc = A._scCollect(m, []); if (sc.err) return A.toast(sc.err, 'err');
+    if (!confirm('Credit these rewards?\n' + credits.map(c => `${c.name}: ${c.kills} kills × ₹${perKill} = ₹${c.amt}`).join('\n') + A._scSummary(sc))) return;
     try {
       const writes = [], killMap = {};
       for (const c of credits) {
@@ -511,7 +587,8 @@ Object.assign(window.A, {
         winners: top.map((c, i) => ({ rank: i + 1, names: [c.name], amount: c.amt, kills: c.kills, uids: [c.uid] })),
         winnerName: top[0].name
       });
-      A.toast('Kill rewards credited!'); A.closeModal('m-players'); A.loadMatches();
+      A._scFail = ''; const scMsg = await A._scIssue(m, sc);
+      A.toast(A._scFail || ('Kill rewards credited!' + scMsg), A._scFail ? 'err' : undefined); A.closeModal('m-players'); A.loadMatches();
     } catch (e) { A.toast('Error: ' + e.message, 'err'); }
   },
 

@@ -115,7 +115,7 @@ def scratch(uid, cid):
         up = {"withdrawBalance": round(wd + amt, 2), "totalEarned": round(float(u.get("totalEarned", 0) or 0) + amt, 2)} if to == "withdraw" else {"depositBalance": round(dep + amt, 2)}
         tx.update(uref, up); tx.update(cref, {"status": "scratched", "amount": amt, "scratchedAt": NOW(), "creditedTo": to})
         tref = uref.collection("transactions").document()
-        title = {"ref": "Referral Scratch Card 🎁", "gift": "Gift Scratch Card 🎁"}.get(src, "Reward Scratch Card 🎁")
+        title = {"ref": "Referral Scratch Card 🎁", "gift": "Gift Scratch Card 🎁", "match": "Match Reward Scratch Card 🎁"}.get(src, "Reward Scratch Card 🎁")
         tx.set(tref, {"title": title, "amount": f"+₹{amt:g}", "type": "game", "kind": "gift", "status": "success", "date": dt.datetime.now(IST).strftime("%d/%m/%Y"), "timestamp": fs.SERVER_TIMESTAMP, "createdAt": NOW()})
         return ("ok", amt)
     with ulock(uid): st, val = _tx(run)
@@ -177,6 +177,34 @@ def admin_send(p):
     _tot(cardsIssued=n)
     _card_notify(uid, "🎁 You received a Scratch Card!" if n == 1 else f"🎁 You received {n} Scratch Cards!", note or "FF Cash Battle sent you a scratch card. Scratch it to reveal your prize!", ids[0])
     return {"ok": True, "uid": uid, "cards": ids}
+
+def admin_match_cards(p):
+    """Admin -> match winners / players: one scratch card per user per match (fixed or random min..max). Idempotent: a user never gets two cards for the same match."""
+    mid = str(p.get("matchId", "")).strip()[:60]
+    rows = p.get("cards") or []
+    if not mid or not isinstance(rows, list) or not rows: return {"ok": False, "error": "No cards to send"}
+    if len(rows) > 300: return {"ok": False, "error": "Too many cards in one go (max 300)"}
+    to = "withdraw" if p.get("creditTo") == "withdraw" else "deposit"; title = str(p.get("title", "") or "")[:40]
+    db = fb.get_db(); issued, skipped = [], 0
+    for r in rows:
+        uid = str((r or {}).get("uid", "")).strip()
+        if not uid or "/" in uid: skipped += 1; continue
+        try:
+            lo = max(1, int(float(r.get("min", 1) or 1))); hi = max(lo, int(float(r.get("max", lo) or lo)))
+        except Exception: skipped += 1; continue
+        if hi > 100000: skipped += 1; continue
+        if not db.collection("users").document(uid).get().exists: skipped += 1; continue
+        label = str(r.get("label", "") or "Reward")[:30]
+        note = f"{label} — {title or 'your match'}. Scratch to reveal your prize!"
+        cid = f"{uid}_m{mid}"
+        try:
+            db.collection("ref_cards").document(cid).create({"uid": uid, "seq": 0, "status": "new", "amount": 0, "min": lo, "max": hi, "src": "match", "matchId": mid,
+                                                             "creditTo": to, "note": note, "createdAt": NOW()})
+        except AlreadyExists: skipped += 1; continue
+        issued.append(cid)
+        _card_notify(uid, "🎁 Match Reward: Scratch Card!", note, cid)
+    if issued: _tot(cardsIssued=len(issued))
+    return {"ok": True, "issued": len(issued), "skipped": skipped}
 
 def admin_cancel(cid):
     """Admin cancels an UNSCRATCHED card (gift / admin / referral). Scratched cards cannot be taken back. The user is told in Notifications."""
@@ -326,6 +354,9 @@ def register(app):
     @app.post("/api/ref/admin/sendcard")
     @security.login_required
     def ref_a_send(): return jsonify(admin_send(request.get_json(silent=True) or {}))
+    @app.post("/api/ref/admin/matchcards")
+    @security.login_required
+    def ref_a_matchcards(): return jsonify(admin_match_cards(request.get_json(silent=True) or {}))
     @app.post("/api/ref/admin/cancelcard")
     @security.login_required
     def ref_a_cancel(): return jsonify(admin_cancel(str((request.get_json(silent=True) or {}).get("card", ""))))

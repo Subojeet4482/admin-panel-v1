@@ -14,7 +14,12 @@ service cloud.firestore {
     function isMe(u) { return signedIn() && request.auth.uid == u; }
 
     // Min withdrawal set by the admin (Settings -> Min Withdrawal). Default Rs 10.
-    function minWd()       { return get(/databases/$(database)/documents/config/banner).data.get('minWithdraw', 10); }
+    // Min withdrawal (admin Settings). Safe against an old/odd stored value: a text value like "10" is converted to a number,
+    // anything else falls back to 10 (a text value used to make EVERY withdrawal fail with "permission denied").
+    function minWd() {
+      let m = get(/databases/$(database)/documents/config/banner).data.get('minWithdraw', 10);
+      return m is number ? m : (m is string ? float(m) : 10);
+    }
     // Admin switches (config/banner): depositEnabled, withdrawEnabled (all withdrawals), wdUpiEnabled, wdGpEnabled. Missing = ON.
     function cfgOn(k)      { return get(/databases/$(database)/documents/config/banner).data.get(k, true) != false; }
     function userPath(u)   { return /databases/$(database)/documents/users/$(u); }
@@ -173,7 +178,7 @@ service cloud.firestore {
           let amt = float(t.amount.split('₹')[1]);
           let before = get(userPath(uid)).data.get('withdrawBalance', 0);
           let after = getAfter(userPath(uid)).data.get('withdrawBalance', 0);
-          return notBanned() && amt >= minWd() && cfgOn('withdrawEnabled')
+          return notBanned() && amt >= (minWd() - 0.001) && cfgOn('withdrawEnabled')
               && ((t.get('method', '') == 'UPI' && cfgOn('wdUpiEnabled')) || (t.get('method', '') == 'GIFTCARD' && cfgOn('wdGpEnabled'))) && (before - after) >= (amt - 0.01);
         }
 
