@@ -186,17 +186,10 @@ Object.assign(window.A, {
   setPrize(k) { F.prize = k; A.renderPrizeChips(); },
   renderPrizeFields() {
     const box = document.getElementById('m-prize-fields');
-    const inp = (id, lbl, ph) => `<div style="flex:1;min-width:120px;"><div class="lbl">${lbl}</div><input class="inp" id="${id}" type="number" min="0" placeholder="${ph || '0'}"></div>`;
-    let h = '';
-    if (F.prize === 'per_kill') h = inp('m-p-kill', 'Prize per Kill ₹');
-    else if (F.prize === 'match_win') h = inp('m-p1', (F.mode === 'BR' ? 'Match Win Prize ₹' : 'Winning Team Prize ₹ (split equally)'));
-    else {
-      h = inp('m-p1', '🥇 1st Prize ₹');
-      if (F.prize !== 'top1') h += inp('m-p2', '🥈 2nd Prize ₹');
-      if (F.prize === 'top3') h += inp('m-p3', '🥉 3rd Prize ₹');
-    }
-    box.innerHTML = `<div class="fade-up" style="display:flex;gap:12px;flex-wrap:wrap;">${h}</div>` +
-      (F.size > 1 && F.prize !== 'per_kill' ? '<div class="res-note">Team prize is split equally between all team members.</div>' : '');
+    const kill = '';
+    box.innerHTML = kill + '<div id="m-rw" class="fade-up"></div>' +
+      (F.size > 1 && F.prize !== 'per_kill' ? '<div class="res-note">Team coin prize is split equally between all team members. Each team member gets their own scratch card.</div>' : '');
+    A.rwInit('m', F.prize, F.size > 1, null);
   },
   async createMatch() {
     const g = (id) => { const e = document.getElementById(id); return e ? Number(e.value) || 0 : 0; };
@@ -207,15 +200,11 @@ Object.assign(window.A, {
     let total = Number(document.getElementById('m-slots').value) || 0;
     if (F.mode === 'BR') { total = Math.max(F.size, Math.min(48, total)); total -= total % F.size; }
     else total = F.size * 2;
-    const prizes = { 1: g('m-p1'), 2: g('m-p2'), 3: g('m-p3') };
-    const perKill = g('m-p-kill');
-    if (F.prize === 'per_kill' && perKill <= 0) return A.toast('Enter prize per kill', 'err');
-    if (F.prize !== 'per_kill' && prizes[1] <= 0) return A.toast('Enter the prize amount', 'err');
+    const rb = A.rwBuild('m'); if (rb.err) return A.toast(rb.err, 'err');
+    const perKill = rb.perKill || 0;
     const n = rankCount(F.prize);
-    if (n >= 2 && prizes[2] <= 0) return A.toast('Enter 2nd prize', 'err');
-    if (n >= 3 && prizes[3] <= 0) return A.toast('Enter 3rd prize', 'err');
-    const prizeTbl = {}; for (let i = 1; i <= n; i++) prizeTbl[i] = prizes[i];
-    const poolTotal = F.prize === 'per_kill' ? perKill : Object.values(prizeTbl).reduce((a, b) => a + b, 0);
+    const prizeTbl = {}; for (let i = 1; i <= n; i++) prizeTbl[i] = rb.prizes[i] || 0;
+    const poolTotal = F.prize === 'per_kill' ? perKill : rb.pool;  // 0 when every place is a scratch card
     const isTeam = F.size > 1;
     const modeLabel = MODES[F.mode].label;
     const d = {
@@ -228,6 +217,7 @@ Object.assign(window.A, {
       prizeMode: F.prize,
       prizes: F.prize === 'per_kill' ? {} : prizeTbl,
       prize: poolTotal,
+      rewards: rb.rewards,
       fee: g('m-fee'),
       map: document.getElementById('m-map').value,
       startTime,
@@ -236,7 +226,7 @@ Object.assign(window.A, {
       img: document.getElementById('m-img').value.trim(),
       joined: 0, status: 'upcoming', takenSlots: []
     };
-    if (!confirm(`Create ${modeLabel} ${F.sub} match "${title}"?`)) return;
+    if (!confirm(`Create ${modeLabel} ${F.sub} match "${title}"?\n\nRewards:\n` + A._rwLines('m').map(([l, t]) => `${l}: ${t}`).join('\n'))) return;
     try {
       // unique match ID (also used as the document id)
       let code = genCode();
@@ -352,7 +342,7 @@ Object.assign(window.A, {
       <div style="display:flex;gap:8px;"><input class="inp" id="rs-ptime" type="datetime-local" value="${A.esc(m.prizeTime || '')}" style="background:#fff;margin-bottom:0;flex:1;">
       <button class="btn btn-outline" onclick="A.savePrizeTime()"><i class="fa-solid fa-clock"></i> Save</button></div>`;
     if (m.paid) {
-      const w = (m.winners || []).map(x => `<div style="margin-top:6px;">${(RANKS[x.rank] || ['🏅'])[0]} <b>${A.esc((x.names || []).join(', '))}</b>${x.amount ? ' — ₹' + x.amount : ''}</div>`).join('');
+      const w = (m.winners || []).map(x => `<div style="margin-top:6px;">${(RANKS[x.rank] || ['🏅'])[0]} <b>${A.esc((x.names || []).join(', '))}</b>${x.card ? ' — 🎟 Scratch card' : x.amount ? ' — ₹' + x.amount : ''}</div>`).join('');
       box.innerHTML = `<div class="done-banner"><div style="font-weight:800;">✅ Prizes already paid</div>${w}${m.scratchCards ? `<div style="margin-top:8px;color:#7e22ce;font-weight:700;">🎟 ${m.scratchCards} scratch card(s) sent</div>` : ''}</div>`;
       return;
     }
@@ -360,33 +350,31 @@ Object.assign(window.A, {
     let h = '';
     if (pm === 'per_kill') {
       const pk = Number((m.prizes && m.prizes[1]) || m.prize) || 0;
-      h = `<div class="res-box"><h4>🎯 Per Kill — Enter Kills</h4>
-        <div class="res-note">₹${pk} per kill. Enter kills for each player, then credit all.</div>
+      h = A._rwBox(m, pm) + `<div class="res-box"><h4>🎯 Per Kill — Enter Kills</h4>
+        <div class="res-note">${(A._rwPlace(m, 'K').t === 'card') ? '🎟 Scratch card per kill: each player gets one card (kills × card amount).' : '₹' + pk + ' per kill.'} Enter kills for each player, then confirm.</div>
         ${players.map(p => `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
           <div style="flex:1;font-weight:600;font-size:0.82rem;">${A.esc(p.appName || 'User')}<br><span style="font-size:0.68rem;color:var(--sub);">${A.esc(p.gameUid || '---')}${p.slot ? ' • Slot #' + p.slot : ''}</span></div>
           <input type="number" min="0" placeholder="Kills" class="inp" style="width:80px;margin:0;" data-uid="${p.uid}" data-name="${A.esc(p.appName || 'User')}" data-kill>
         </div>`).join('')}
         ${prizeTimeRow}
-        ${A._scBox(m, pm)}
-        <button class="btn btn-success btn-full" style="margin-top:12px;" onclick="A.creditKills()"><i class="fa-solid fa-coins"></i> Calculate & Credit All</button></div>`;
+        <button class="btn btn-success btn-full" style="margin-top:12px;" onclick="A.creditKills()"><i class="fa-solid fa-coins"></i> Calculate & Give Rewards</button></div>`;
     } else {
       const n = rankCount(pm), opts = A._winnerOptions(m), team = (m.teamSize || 1) > 1;
       const pr = m.prizes || {};
       let rows = '';
       for (let i = 1; i <= n; i++) {
-        const amt = Number(pr[i] || (i === 1 ? m.prize : 0)) || 0;
+        const amt = Number(pr[i] || (i === 1 ? m.prize : 0)) || 0, pl = A._rwPlace(m, String(i));
         rows += `<div class="rank-row" style="animation-delay:${i * 70}ms">
           <div class="rank-head"><span class="medal">${RANKS[i][0]}</span>${pm === 'match_win' ? (team ? 'Winning Team' : 'Match Winner') : RANKS[i][1] + ' Place'}</div>
           <select class="inp" id="rk-w${i}" style="background:#fff;" onchange="A.updateSplit(${i})"><option value="">-- Select ${team ? 'team' : 'player'} --</option>${opts}</select>
-          <div class="lbl">Prize Amount ₹</div>
-          <input class="inp" id="rk-a${i}" type="number" min="0" value="${amt || ''}" oninput="A.updateSplit(${i})" style="background:#fff;">
+          ${pl.t === 'card' ? `<div class="res-note" style="margin:6px 0;">🎟 Gets a scratch card (${A._rwTxt(pl)}) — no coin amount needed.</div><input type="hidden" id="rk-a${i}" value="0">`
+            : `<div class="lbl">Prize Amount ₹</div><input class="inp" id="rk-a${i}" type="number" min="0" value="${amt || ''}" oninput="A.updateSplit(${i})" style="background:#fff;">`}
           <div class="rank-split" id="rk-s${i}"></div>
         </div>`;
       }
-      h = `<div class="res-box"><h4>🏆 Select Winners</h4>
+      h = A._rwBox(m, pm) + `<div class="res-box"><h4>🏆 Select Winners</h4>
         <div class="res-note">${team ? 'The whole team gets the prize — the amount is divided equally between its members.' : 'Only registered players of this match can be selected.'}</div>
         ${rows}${prizeTimeRow}
-        ${A._scBox(m, pm)}
         <button class="btn btn-success btn-full" style="margin-top:12px;" onclick="A.distributeRanks()"><i class="fa-solid fa-trophy"></i> Confirm & Credit Winners</button></div>`;
     }
     h += `<div class="res-box" style="margin-top:12px;background:#f8fafc;border:1px dashed var(--border);">
@@ -396,72 +384,140 @@ Object.assign(window.A, {
       <button class="btn btn-outline btn-full" onclick="A.completeNoPayout()"><i class="fa-solid fa-flag-checkered"></i> Mark Completed</button></div>`;
     box.innerHTML = h;
   },
-  /* ================= Scratch-card rewards for match results ================= */
-  _scRow(key, label, auto) {
-    return `<div class="rank-row" style="margin-bottom:8px;">
-      <div class="rank-head" style="font-size:.82rem;">${label}</div>
-      <select class="inp" id="sc-m${key}" onchange="A.scMode('${key}')" style="background:#fff;margin-bottom:6px;">
-        <option value="none">No scratch card</option>
-        <option value="fixed">Fixed amount ₹</option>
-        <option value="random">Random ₹ min – max</option>
-        ${auto ? '<option value="auto">Auto (small random, by entry fee)</option>' : ''}
-      </select>
-      <div id="sc-f${key}" style="display:none;"><input class="inp" id="sc-fx${key}" type="number" min="1" placeholder="Fixed ₹" style="background:#fff;"></div>
-      <div id="sc-r${key}" style="display:none;gap:8px;">
-        <input class="inp" id="sc-lo${key}" type="number" min="1" placeholder="Min ₹" style="background:#fff;flex:1;">
-        <input class="inp" id="sc-hi${key}" type="number" min="1" placeholder="Max ₹" style="background:#fff;flex:1;">
-      </div>
-      <div class="res-note" id="sc-a${key}" style="display:none;"></div>
-    </div>`;
+  /* ================= Rewards builder (create + edit): Coin or Scratch Card for 1st / 2nd / 3rd / everyone ================= */
+  rwInit(p, pm, team, m) {
+    const n = pm === 'per_kill' ? 0 : rankCount(pm), rw = (m && m.rewards) || null, pr = (m && m.prizes) || {};
+    const blank = () => ({ mode: 'random', fixed: '', min: '', max: '' });
+    const S = { pm, team, keys: [], places: {}, def: blank(), to: 'deposit' };
+    for (let i = 1; i <= n; i++) S.keys.push(String(i)); if (pm === 'per_kill') S.keys.push('K'); S.keys.push('R');
+    if (rw) { S.to = rw.to || 'deposit'; if (rw.def) S.def = Object.assign(blank(), rw.def, { fixed: rw.def.min }); }
+    S.keys.forEach(k => {
+      const o = rw && rw.places && rw.places[k], pl = { t: k === 'R' ? 'none' : 'coin', amt: '', diff: false, c: blank() };
+      if (o) { pl.t = o.t; if (o.t === 'coin') pl.amt = o.amt; if (o.t === 'card') { pl.diff = !!o.diff; pl.c = { mode: o.mode || 'random', fixed: o.min, min: o.min, max: o.max }; } }
+      else if (k === 'K') pl.amt = Number(pr[1] || (m && m.prize)) || '';
+      else if (!rw && k !== 'R') pl.amt = Number(pr[k] || (k === '1' ? (m && m.prize) : 0)) || '';
+      S.places[k] = pl;
+    });
+    A._RW = A._RW || {}; A._RW[p] = S; A.rwRender(p);
   },
-  _scBox(m, pm) {
-    const n = pm === 'per_kill' ? 0 : rankCount(pm), team = (m.teamSize || 1) > 1;
-    let rows = '';
-    for (let i = 1; i <= n; i++) rows += A._scRow(String(i), `${RANKS[i][0]} ${pm === 'match_win' ? (team ? 'Winning Team' : 'Match Winner') : RANKS[i][1] + ' Place'} — scratch card`, false);
-    rows += A._scRow('R', n ? '👥 Everyone else (rest of the players)' : '👥 All players', true);
-    return `<div class="res-box" style="margin-top:12px;background:#faf5ff;border:1px solid #e9d5ff;">
-      <h4 style="color:#7e22ce;">🎟 Scratch Card Rewards <small style="font-weight:600;">(optional, on top of cash)</small></h4>
-      <div class="res-note">Set each place separately. Money is added only when the player scratches the card. Team members each get their own card.</div>
-      ${rows}
-      <div class="lbl">Scratch money goes to</div>
-      <select class="inp" id="sc-to" style="background:#fff;"><option value="deposit">Deposit balance</option><option value="withdraw">Withdrawal balance</option></select>
-    </div>`;
+  _rwLabel(S, k) {
+    if (k === 'K') return '🎯 Reward per Kill';
+    if (k === 'R') return S.pm === 'per_kill' ? '👥 Everyone who joined' : '👥 Everyone else who joined';
+    return S.pm === 'match_win' ? (S.team ? '🏆 Winning Team' : '🏆 Match Winner') : `${RANKS[k][0]} ${RANKS[k][1]} Place`;
   },
-  scMode(k) {
-    const v = document.getElementById('sc-m' + k).value, g = (id) => document.getElementById(id + k);
-    g('sc-f').style.display = v === 'fixed' ? 'block' : 'none';
-    g('sc-r').style.display = v === 'random' ? 'flex' : 'none';
-    const a = g('sc-a'), fee = Number((A._M || {}).fee) || 0;
-    a.style.display = v === 'auto' ? 'block' : 'none';
-    if (v === 'auto') a.textContent = `Auto: each player gets a random ₹1 – ₹${Math.max(2, Math.round(fee / 2))} card (half of the ₹${fee} entry fee, min ₹2).`;
+  _rwF(n) { return Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }); },
+  _rwTxt(c) { return c.min === c.max ? '₹' + A._rwF(c.min) : `₹${A._rwF(c.min)} – ₹${A._rwF(c.max)}`; },
+  _rwCfg(p, k, c) {
+    const pill = (m, l) => `<button type="button" class="chip ${c.mode === m ? 'active' : ''}" onclick="A.rwCM('${p}','${k}','${m}')">${l}</button>`;
+    const box = (f, ph) => `<input class="inp" type="number" min="0.1" max="999999999" step="any" inputmode="decimal" placeholder="${ph}" value="${c[f] === undefined ? '' : c[f]}" oninput="A.rwC('${p}','${k}','${f}',this.value)" style="background:#fff;flex:1;margin:0;">`;
+    return `<div class="chip-row" style="margin:6px 0;">${pill('fixed', '📌 Fixed')}${pill('random', '🎲 Random')}</div>` +
+      (c.mode === 'fixed' ? `<div class="lbl">Card amount ₹ (same for everyone) · 0.1 to 999999999</div><div style="display:flex;gap:8px;">${box('fixed', 'e.g. 10')}</div>`
+        : `<div class="lbl">Random between (₹ min – ₹ max) · min 0.1, max 999999999</div><div style="display:flex;gap:8px;">${box('min', 'Min ₹')}${box('max', 'Max ₹')}</div>`);
   },
-  // read one scratch row -> null (none) | {min,max} | {err}
-  _scRead(k, fee) {
-    const sel = document.getElementById('sc-m' + k); if (!sel || sel.value === 'none') return null;
-    const num = (id) => Math.floor(Number(document.getElementById(id + k).value) || 0);
-    if (sel.value === 'fixed') { const v = num('sc-fx'); return v >= 1 ? { min: v, max: v } : { err: 'Enter the fixed scratch amount' }; }
-    if (sel.value === 'random') { const lo = num('sc-lo'), hi = num('sc-hi'); return (lo >= 1 && hi >= lo) ? { min: lo, max: hi } : { err: 'Scratch card: Min must be ≥ 1 and Max ≥ Min' }; }
-    return { min: 1, max: Math.max(2, Math.round(fee / 2)) };
+  rwRender(p) {
+    const S = A._RW && A._RW[p], box = document.getElementById(p + '-rw'); if (!S || !box) return;
+    const needDef = S.keys.some(k => S.places[k].t === 'card' && !S.places[k].diff);
+    const dc = S.def, defTxt = dc.mode === 'fixed' ? (Number(dc.fixed) > 0 ? '₹' + dc.fixed : 'not set yet ↓') : (Number(dc.min) > 0 && Number(dc.max) >= Number(dc.min) ? `₹${dc.min} – ₹${dc.max}` : 'not set yet ↓');
+    const rows = S.keys.map((k, idx) => {
+      const pl = S.places[k];
+      const pill = (t, l) => `<button type="button" class="chip ${pl.t === t ? 'active' : ''}" onclick="A.rwT('${p}','${k}','${t}')">${l}</button>`;
+      let body = '';
+      if (pl.t === 'coin') body = `<div class="lbl">🪙 Coin amount ₹ ${k === 'K' ? '(per kill)' : k === 'R' ? '(each player)' : S.team ? '(split equally in team)' : ''}</div><input class="inp" type="number" min="0.1" max="999999999" step="any" inputmode="decimal" placeholder="e.g. 100 or 0.5" value="${pl.amt}" oninput="A.rwV('${p}','${k}',this.value)" style="background:#fff;margin:0;">`;
+      else if (pl.t === 'card') body = pl.diff
+        ? `<div class="rw-use">🎟 Different card amount for this place</div>${A._rwCfg(p, k, pl.c)}<button type="button" class="rw-link" onclick="A.rwDiff('${p}','${k}')">↩ Use the default card amount instead</button>`
+        : `<div class="rw-use">🎟 ${k === 'K' ? 'Card amount per kill' : 'Card amount'}: <b>${defTxt}</b> <small>(default — Step 2)</small></div>${k === 'K' ? '<div class="res-note" style="margin:0 0 6px;">Each player gets ONE card. Its money = kills × amount (Random: every kill is rolled separately).</div>' : ''}<button type="button" class="rw-link" onclick="A.rwDiff('${p}','${k}')">✎ Give a different amount to this place</button>`;
+      else body = '<div class="res-note" style="margin:0;">No reward for this group.</div>';
+      return `<div class="rw-card"><div class="rw-head"><span class="rw-n">${idx + 1}</span>${A._rwLabel(S, k)}</div>
+        <div class="chip-row" style="margin-bottom:8px;">${pill('coin', '🪙 Coin')}${pill('card', '🎟 Scratch Card')}${k === 'R' ? pill('none', '✖ None') : ''}</div>${body}</div>`;
+    }).join('');
+    const step2 = needDef ? `<div class="rw-step">Step 2 — 🎟 Scratch card amount</div><div class="rw-card rw-def">${A._rwCfg(p, 'def', S.def)}
+        <div class="lbl" style="margin-top:8px;">Card money goes to</div>
+        <select class="inp" style="background:#fff;margin:0;" onchange="A.rwTo('${p}',this.value)"><option value="deposit" ${S.to === 'deposit' ? 'selected' : ''}>Deposit balance</option><option value="withdraw" ${S.to === 'withdraw' ? 'selected' : ''}>Withdrawal balance</option></select></div>`
+      : (S.keys.some(k => S.places[k].t === 'card') ? `<div class="lbl" style="margin-top:8px;">Card money goes to</div><select class="inp" style="background:#fff;" onchange="A.rwTo('${p}',this.value)"><option value="deposit" ${S.to === 'deposit' ? 'selected' : ''}>Deposit balance</option><option value="withdraw" ${S.to === 'withdraw' ? 'selected' : ''}>Withdrawal balance</option></select>` : '');
+    box.innerHTML = `<div class="rw-step">Step 1 — Coin or Scratch Card for each place</div>${rows}${step2}<div class="rw-sum" id="${p}-rw-sum"></div>`;
+    A.rwSum(p);
   },
-  // entries = [{rank, members}] (empty for per-kill). Returns {plan, to} or {err}
-  _scCollect(m, entries) {
-    const fee = Number(m.fee) || 0, plan = [], used = new Set();
-    for (const e of entries) {
-      const c = A._scRead(String(e.rank), fee); if (c && c.err) return c;
-      e.members.forEach(p => used.add(p.uid));
-      if (c) e.members.forEach(p => plan.push({ uid: p.uid, name: p.appName || 'User', min: c.min, max: c.max, label: `${RANKS[e.rank][1]} place` }));
+  // plain-text lines "who gets what" for the form + confirm box
+  _rwLines(p) {
+    const S = A._RW && A._RW[p]; if (!S) return [];
+    const f = A._rwF, nz = (v) => Math.round((Number(v) || 0) * 100) / 100, good = (v) => v >= 0.1 && v <= 999999999;
+    const cardTxt = (c) => c.mode === 'fixed' ? (good(nz(c.fixed)) ? `fixed ₹${f(nz(c.fixed))}` : '⚠ set amount') : (good(nz(c.min)) && nz(c.max) >= nz(c.min) && good(nz(c.max)) ? `random ₹${f(nz(c.min))} – ₹${f(nz(c.max))}` : '⚠ set min & max');
+    return S.keys.map(k => {
+      const pl = S.places[k], sfx = k === 'K' ? ' per kill' : '';
+      let t;
+      if (pl.t === 'coin') t = good(nz(pl.amt)) ? `🪙 ₹${f(nz(pl.amt))}${sfx}${k === 'R' ? ' each' : S.team && k !== 'K' ? ' (split in team)' : ''}` : '🪙 ⚠ set coin amount';
+      else if (pl.t === 'card') t = `🎟 Scratch card — ${cardTxt(pl.diff ? pl.c : S.def)}${sfx}${S.team && k !== 'K' && k !== 'R' ? ' (each member)' : ''}`;
+      else t = '— nothing';
+      return [A._rwLabel(S, k), t];
+    });
+  },
+  rwSum(p) {
+    const S = A._RW && A._RW[p], el = document.getElementById(p + '-rw-sum'); if (!S || !el) return;
+    const any = S.keys.some(k => S.places[k].t === 'card');
+    el.innerHTML = `<div class="rw-sum-t">📋 Summary — who gets what</div>` + A._rwLines(p).map(([l, t]) => `<div class="rw-sum-r"><span>${l}</span><b>${t}</b></div>`).join('') +
+      (any ? `<div class="rw-sum-f">🎟 Card money goes to <b>${S.to === 'withdraw' ? 'Withdrawal' : 'Deposit'} balance</b> — added only when the player scratches the card.</div>` : '');
+  },
+  _rwCfgOf(p, k) { const S = A._RW[p]; return k === 'def' ? S.def : S.places[k].c; },
+  rwT(p, k, t) { A._RW[p].places[k].t = t; A.rwRender(p); },
+  rwV(p, k, v) { A._RW[p].places[k].amt = v; A.rwSum(p); },
+  rwDiff(p, k) { const pl = A._RW[p].places[k]; pl.diff = !pl.diff; if (pl.diff && !pl.c.min && !pl.c.fixed) pl.c = Object.assign({}, A._RW[p].def); A.rwRender(p); },
+  rwCM(p, k, m) { A._rwCfgOf(p, k).mode = m; A.rwRender(p); },
+  rwC(p, k, f, v) { A._rwCfgOf(p, k)[f] = v; A.rwSum(p); },
+  rwTo(p, v) { A._RW[p].to = v; A.rwSum(p); },
+  // validate + build what is saved on the match -> {rewards, prizes, pool} or {err}
+  rwBuild(p) {
+    const S = A._RW && A._RW[p]; if (!S) return { rewards: null, prizes: {}, pool: 0 };
+    const MIN = 0.1, MAX = 999999999, nz = (v) => Math.round((Number(v) || 0) * 100) / 100, ok = (v) => v >= MIN && v <= MAX;
+    const rd = (c, label) => {
+      const pre = (label || 'Scratch card') + ': ';
+      if (c.mode === 'fixed') { const v = nz(c.fixed); return ok(v) ? { mode: 'fixed', min: v, max: v } : { err: pre + 'card amount must be between ₹0.1 and ₹999999999' }; }
+      const lo = nz(c.min), hi = nz(c.max);
+      return (ok(lo) && ok(hi) && hi >= lo) ? { mode: 'random', min: lo, max: hi } : { err: pre + 'Min must be at least ₹0.1, Max not less than Min (up to ₹999999999)' };
+    };
+    const places = {}, prizes = {}; let pool = 0, def = null, perKill = 0;
+    const dd = rd(S.def, 'Default card'); if (!dd.err) def = dd;
+    for (const k of S.keys) {
+      const pl = S.places[k], lb = String(A._rwLabel(S, k)).replace(/^\S+\s/, '');
+      if (pl.t === 'coin') {
+        const a = nz(pl.amt); if (!ok(a)) return { err: `${lb}: coin amount must be between ₹0.1 and ₹999999999` };
+        places[k] = { t: 'coin', amt: a }; if (k === 'K') { perKill = a; pool = a; } else if (k !== 'R') { prizes[k] = a; pool = nz(pool + a); }
+      } else if (pl.t === 'card') {
+        const c = rd(pl.diff ? pl.c : S.def, pl.diff ? lb : 'Step 2 scratch card amount'); if (c.err) return { err: c.err };
+        places[k] = { t: 'card', mode: c.mode, min: c.min, max: c.max, diff: !!pl.diff }; if (k !== 'R' && k !== 'K') prizes[k] = 0;
+      } else places[k] = { t: 'none' };
     }
-    const r = A._scRead('R', fee); if (r && r.err) return r;
-    if (r) live(m).forEach(p => { if (!used.has(p.uid)) { used.add(p.uid); plan.push({ uid: p.uid, name: p.appName || 'User', min: r.min, max: r.max, label: entries.length ? 'Participation' : 'Match reward' }); } });
-    const to = (document.getElementById('sc-to') || {}).value || 'deposit';
-    return { plan, to };
+    return { rewards: { places, def: def || undefined, to: S.to }, prizes, pool, perKill };
   },
-  _scSummary(sc) { return sc.plan.length ? '\n\n🎟 Scratch cards: ' + sc.plan.length + ' player(s)\n' + sc.plan.slice(0, 12).map(x => `${x.label}: ${x.name} — ₹${x.min}${x.max > x.min ? '–' + x.max : ''}`).join('\n') + (sc.plan.length > 12 ? '\n…' : '') : ''; },
-  // after the cash is paid: create the cards on the server. Returns the toast text.
-  async _scIssue(m, sc) {
-    if (!sc.plan.length) return '';
+  // at result time: what does place k get? (old matches without a plan = coin for ranks, nothing for the rest)
+  _rwPlace(m, k) {
+    const o = m.rewards && m.rewards.places && m.rewards.places[k]; if (o) return o;
+    if (k === 'K') return { t: 'coin', amt: Number((m.prizes || {})[1] || m.prize) || 0 };
+    return k === 'R' ? { t: 'none' } : { t: 'coin', amt: Number((m.prizes || {})[k] || (k === '1' ? m.prize : 0)) || 0 };
+  },
+  _rwBox(m, pm) {
+    if (!m.rewards) return '';
+    const S = { pm, team: (m.teamSize || 1) > 1 }, n = pm === 'per_kill' ? 0 : rankCount(pm), keys = []; for (let i = 1; i <= n; i++) keys.push(String(i)); if (pm === 'per_kill') keys.push('K'); keys.push('R');
+    const line = (k) => { const o = A._rwPlace(m, k); return `<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0;"><span>${A._rwLabel(S, k)}</span><b>${o.t === 'coin' ? '🪙 ₹' + o.amt + (k === 'K' ? '/kill' : '') : o.t === 'card' ? '🎟 Card ' + A._rwTxt(o) + (k === 'K' ? '/kill' : '') : '—'}</b></div>`; };
+    return `<div class="res-box" style="margin-bottom:10px;background:#faf5ff;border:1px solid #e9d5ff;"><h4 style="color:#7e22ce;">🎁 Reward plan <small style="font-weight:600;">(set in Edit Match)</small></h4><div style="font-size:.82rem;">${keys.map(line).join('')}</div></div>`;
+  },
+  // result time: who gets scratch cards / participation coins
+  _rwCollect(m, entries) {
+    const cards = [], used = new Set(), push = (p, c, label, slot, mult) => cards.push({ uid: p.uid, name: p.appName || 'User', min: c.min, max: c.max, label, slot: slot || '', mult: mult || 1 });
+    for (const e of entries) { e.members.forEach(p => used.add(p.uid)); if (e.card) e.members.forEach(p => push(p, e.card, `${RANKS[e.rank][1]} place`, 'r' + e.rank)); }
+    const R = A._rwPlace(m, 'R'), rest = live(m).filter(p => !used.has(p.uid));
+    if (R.t === 'card') rest.forEach(p => push(p, R, entries.length ? 'Participation' : 'Match reward', 'all'));
+    return { cards, restCoin: R.t === 'coin' && R.amt > 0 ? { amt: R.amt, players: rest } : null, to: (m.rewards && m.rewards.to) || 'deposit' };
+  },
+  _rwSummary(sc) {
+    let t = '';
+    if (sc.restCoin) t += `\n\n🪙 Everyone else: ₹${sc.restCoin.amt} × ${sc.restCoin.players.length} player(s)`;
+    if (sc.cards.length) t += '\n\n🎟 Scratch cards: ' + sc.cards.length + ' player(s)\n' + sc.cards.slice(0, 12).map(x => `${x.label}: ${x.name} — ₹${x.min}${x.max > x.min ? '–' + x.max : ''}`).join('\n') + (sc.cards.length > 12 ? '\n…' : '');
+    return t;
+  },
+  async _rwIssue(m, sc) {
+    if (!sc.cards.length) return '';
     try {
-      const r = await A.api('/api/ref/admin/matchcards', { body: { matchId: m.id, title: m.title || '', creditTo: sc.to, cards: sc.plan } });
+      const r = await A.api('/api/ref/admin/matchcards', { body: { matchId: m.id, title: m.title || '', creditTo: sc.to, cards: sc.cards } });
       await updateDoc(doc(db, 'matches', m.id), { scratchCards: r.issued || 0 });
       return ` + ${r.issued} scratch card(s) sent`;
     } catch (e) { A._scFail = 'Cash credited, but scratch cards FAILED: ' + (e.message || e) + ' — send them from the Scratch Cards panel.'; return ''; }
@@ -471,7 +527,7 @@ Object.assign(window.A, {
     const m = A._M, el = document.getElementById('rk-s' + i); if (!el) return;
     const w = A._resolveWinner(m, document.getElementById('rk-w' + i).value);
     const amt = Number(document.getElementById('rk-a' + i).value) || 0;
-    el.innerText = w ? (w.members.length > 1 ? `${w.members.length} members × ₹${r2(amt / w.members.length)} each` : `₹${amt} → ${w.label}`) : '';
+    el.innerText = w ? (amt <= 0 ? '' : w.members.length > 1 ? `${w.members.length} members × ₹${r2(amt / w.members.length)} each` : `₹${amt} → ${w.label}`) : '';
   },
   async savePrizeTime() {
     const id = document.getElementById('players-mid').value;
@@ -518,7 +574,7 @@ Object.assign(window.A, {
     ];
   },
 
-  // 1st / 2nd / 3rd (or single winner): solo player or whole team, amount split equally
+  // 1st / 2nd / 3rd (or single winner): solo player or whole team. Each place = coin or scratch card (set when the match was made)
   async distributeRanks() {
     const m = A._M, matchId = m.id;
     if (await A._alreadyPaid(matchId)) return;
@@ -526,26 +582,32 @@ Object.assign(window.A, {
     const entries = [], used = new Set();
     for (let i = 1; i <= n; i++) {
       const w = A._resolveWinner(m, document.getElementById('rk-w' + i).value);
-      const amt = Number(document.getElementById('rk-a' + i).value) || 0;
+      const pl = A._rwPlace(m, String(i)), card = pl.t === 'card' ? pl : null;
+      const amt = card ? 0 : (Number(document.getElementById('rk-a' + i).value) || 0);
       if (!w) { if (i === 1) return A.toast('Select the 1st winner', 'err'); continue; }
-      if (amt <= 0) return A.toast(`Enter prize amount for ${RANKS[i][1]}`, 'err');
+      if (!card && amt <= 0) return A.toast(`Enter prize amount for ${RANKS[i][1]}`, 'err');
       if (w.members.some(p => used.has(p.uid))) return A.toast('A player cannot win two places', 'err');
       w.members.forEach(p => used.add(p.uid));
-      entries.push({ rank: i, label: w.label, members: w.members, amount: amt, per: r2(amt / w.members.length) });
+      entries.push({ rank: i, label: w.label, members: w.members, amount: amt, per: r2(amt / w.members.length), card });
     }
-    const sum = entries.map(e => `${RANKS[e.rank][1]}: ${e.label} — ₹${e.amount}${e.members.length > 1 ? ` (₹${e.per} × ${e.members.length})` : ''}`).join('\n');
-    const sc = A._scCollect(m, entries); if (sc.err) return A.toast(sc.err, 'err');
-    if (!confirm(`Credit these prizes?\n\n${sum}${A._scSummary(sc)}`)) return;
+    const sc = A._rwCollect(m, entries);
+    const sum = entries.map(e => `${RANKS[e.rank][1]}: ${e.label} — ${e.card ? '🎟 Scratch card ' + A._rwTxt(e.card) + (e.members.length > 1 ? ` (each of ${e.members.length})` : '') : '₹' + e.amount + (e.members.length > 1 ? ` (₹${e.per} × ${e.members.length})` : '')}`).join('\n');
+    if (!confirm(`Give these rewards?\n\n${sum}${A._rwSummary(sc)}`)) return;
     try {
       const writes = [], winMap = {};
       for (const e of entries) for (const p of e.members) {
         winMap[p.uid] = { amt: e.per, rank: e.rank };
-        writes.push(...A._credit(p.uid, e.per, `Match win success: ₹${e.per}`, `${RANKS[e.rank][1]} place${e.members.length > 1 ? ' (team prize split)' : ''} — reward added to withdrawal balance.`, e.rank === 1, 0, p.appName));
+        if (e.card) { if (e.rank === 1) writes.push(setDoc(doc(db, 'users', p.uid), { matchesWon: increment(1) }, { merge: true })); }
+        else writes.push(...A._credit(p.uid, e.per, `Match win success: ₹${e.per}`, `${RANKS[e.rank][1]} place${e.members.length > 1 ? ' (team prize split)' : ''} — reward added to withdrawal balance.`, e.rank === 1, 0, p.appName));
+      }
+      if (sc.restCoin) for (const p of sc.restCoin.players) {
+        winMap[p.uid] = { amt: sc.restCoin.amt, rank: 0 };
+        writes.push(...A._credit(p.uid, sc.restCoin.amt, `Match reward: ₹${sc.restCoin.amt}`, 'Thanks for playing — participation reward added to withdrawal balance.', false, 0, p.appName));
       }
       await Promise.all(writes);
       const fresh = (await getDoc(doc(db, 'matches', matchId))).data() || {};
-      const parts = (fresh.participants || []).map(p => winMap[p.uid] ? { ...p, winAmount: winMap[p.uid].amt, rank: winMap[p.uid].rank } : { ...p, winAmount: 0 });
-      const winners = entries.map(e => ({ rank: e.rank, names: e.members.map(p => p.appName || 'User'), amount: e.amount, uids: e.members.map(p => p.uid) }));
+      const parts = (fresh.participants || []).map(p => { const w = winMap[p.uid]; return w ? (w.rank ? { ...p, winAmount: w.amt, rank: w.rank } : { ...p, winAmount: w.amt }) : { ...p, winAmount: 0 }; });
+      const winners = entries.map(e => ({ rank: e.rank, names: e.members.map(p => p.appName || 'User'), amount: e.amount, uids: e.members.map(p => p.uid), ...(e.card ? { card: true } : {}) }));
       const first = entries.find(e => e.rank === 1);
       await updateDoc(doc(db, 'matches', matchId), {
         status: 'completed', paid: true, participants: parts, winners,
@@ -553,42 +615,47 @@ Object.assign(window.A, {
         winnerUid: first ? first.members[0].uid : '', winnerUids: first ? first.members.map(p => p.uid) : [],
         paidAt: Date.now()
       });
-      A._scFail = ''; const scMsg = await A._scIssue(m, sc);
-      A.toast(A._scFail || ('Winners credited!' + scMsg), A._scFail ? 'err' : undefined); A.closeModal('m-players'); A.loadMatches();
+      A._scFail = ''; const scMsg = await A._rwIssue(m, sc);
+      A.toast(A._scFail || ('Rewards given!' + scMsg), A._scFail ? 'err' : undefined); A.closeModal('m-players'); A.loadMatches();
     } catch (e) { A.toast('Error: ' + e.message, 'err'); }
   },
 
-  // Per Kill: kills x amount per kill
+  // Per Kill: kills x coin per kill, OR one scratch card per player (money = kills x card amount). Plus the "everyone who joined" reward.
   async creditKills() {
     const m = A._M, matchId = m.id;
     if (await A._alreadyPaid(matchId)) return;
-    const perKill = Number((m.prizes && m.prizes[1]) || m.prize) || 0;
-    if (perKill <= 0) return A.toast('Per-kill amount is not set for this match', 'err');
+    const K = A._rwPlace(m, 'K'), kcard = K.t === 'card', perKill = kcard ? 0 : (Number(K.amt) || 0);
+    if (!kcard && perKill <= 0) return A.toast('Per-kill amount is not set for this match', 'err');
     const credits = [];
     document.querySelectorAll('#result-panel input[data-kill]').forEach(inp => {
       const kills = parseInt(inp.value) || 0;
-      if (kills > 0) credits.push({ uid: inp.dataset.uid, name: inp.dataset.name, kills, amt: r2(kills * perKill) });
+      if (kills > 0) credits.push({ uid: inp.dataset.uid, name: inp.dataset.name, kills, amt: kcard ? 0 : r2(kills * perKill) });
     });
     if (!credits.length) return A.toast('Enter kills for at least one player', 'err');
-    const sc = A._scCollect(m, []); if (sc.err) return A.toast(sc.err, 'err');
-    if (!confirm('Credit these rewards?\n' + credits.map(c => `${c.name}: ${c.kills} kills × ₹${perKill} = ₹${c.amt}`).join('\n') + A._scSummary(sc))) return;
+    const sc = A._rwCollect(m, []);
+    if (kcard) credits.forEach(c => sc.cards.push({ uid: c.uid, name: c.name, min: K.min, max: K.max, label: `${c.kills} kill${c.kills > 1 ? 's' : ''}`, slot: 'k', mult: Math.min(50, c.kills) }));
+    const kLine = (c) => kcard ? `${c.name}: ${c.kills} kills → 🎟 1 card (${c.kills} × ${A._rwTxt(K)})` : `${c.name}: ${c.kills} kills × ₹${perKill} = ₹${c.amt}`;
+    const extra = A._rwSummary({ restCoin: sc.restCoin, cards: sc.cards.filter(x => x.slot !== 'k') });
+    if (!confirm('Give these rewards?\n' + credits.map(kLine).join('\n') + extra)) return;
     try {
       const writes = [], killMap = {};
       for (const c of credits) {
         killMap[c.uid] = c;
-        writes.push(...A._credit(c.uid, c.amt, `Match win success: ₹${c.amt} (${c.kills} kills)`, `Per Kill reward: ${c.kills} × ₹${perKill}.`, false, c.kills, c.name));
+        if (kcard) writes.push(setDoc(doc(db, 'users', c.uid), { kills: increment(c.kills) }, { merge: true }));
+        else writes.push(...A._credit(c.uid, c.amt, `Match win success: ₹${c.amt} (${c.kills} kills)`, `Per Kill reward: ${c.kills} × ₹${perKill}.`, false, c.kills, c.name));
       }
+      if (sc.restCoin) for (const p of sc.restCoin.players) writes.push(...A._credit(p.uid, sc.restCoin.amt, `Match reward: ₹${sc.restCoin.amt}`, 'Thanks for playing — participation reward added to withdrawal balance.', false, 0, p.appName));
       await Promise.all(writes);
       const fresh = (await getDoc(doc(db, 'matches', matchId))).data() || {};
       const parts = (fresh.participants || []).map(p => killMap[p.uid] ? { ...p, kills: killMap[p.uid].kills, winAmount: killMap[p.uid].amt } : { ...p, kills: 0, winAmount: 0 });
       const top = [...credits].sort((a, b) => b.kills - a.kills).slice(0, 3);
       await updateDoc(doc(db, 'matches', matchId), {
         status: 'completed', paid: true, participants: parts, paidAt: Date.now(),
-        winners: top.map((c, i) => ({ rank: i + 1, names: [c.name], amount: c.amt, kills: c.kills, uids: [c.uid] })),
+        winners: top.map((c, i) => ({ rank: i + 1, names: [c.name], amount: c.amt, kills: c.kills, uids: [c.uid], ...(kcard ? { card: true } : {}) })),
         winnerName: top[0].name
       });
-      A._scFail = ''; const scMsg = await A._scIssue(m, sc);
-      A.toast(A._scFail || ('Kill rewards credited!' + scMsg), A._scFail ? 'err' : undefined); A.closeModal('m-players'); A.loadMatches();
+      A._scFail = ''; const scMsg = await A._rwIssue(m, sc);
+      A.toast(A._scFail || ((kcard ? 'Kill cards sent!' : 'Kill rewards credited!') + scMsg), A._scFail ? 'err' : undefined); A.closeModal('m-players'); A.loadMatches();
     } catch (e) { A.toast('Error: ' + e.message, 'err'); }
   },
 
@@ -618,9 +685,8 @@ Object.assign(window.A, {
     const pr = m.prizes || {};
     const inp = (i, lbl, val) => `<div style="flex:1;min-width:110px;"><div class="lbl">${lbl}</div><input class="inp" id="${i}" type="number" min="0" value="${val || ''}"></div>`;
     let pf = '';
-    if (m.paid) pf = '<div class="res-note">Prize already paid — prize amounts are locked.</div>';
-    else if (pm === 'per_kill') pf = inp('e-p-kill', 'Prize per Kill ₹', Number(pr[1] || m.prize) || '');
-    else { const n = rankCount(pm); for (let i = 1; i <= n; i++) pf += inp('e-p' + i, ['', '🥇 1st', '🥈 2nd', '🥉 3rd'][i] + ' Prize ₹', Number(pr[i] || (i === 1 ? m.prize : 0)) || ''); }
+    if (m.paid) pf = '<div class="res-note">Prize already paid — rewards are locked.</div>';
+    else pf = '<div id="e-rw"></div>';
     const maps = ['Bermuda', 'Bermuda Remastered', 'Purgatory', 'Kalahari', 'Alpine', 'NexTerra', 'Solara'];
     if (m.map && !maps.includes(m.map)) maps.push(m.map);
     const fixedSlots = m.mode === 'CS' || m.mode === 'LW';
@@ -636,7 +702,7 @@ Object.assign(window.A, {
         <div style="flex:1;"><div class="lbl">Entry Fee ₹</div><input class="inp" id="e-fee" type="number" min="0" value="${Number(m.fee) || 0}"></div>
         <div style="flex:1;"><div class="lbl">Total Slots</div><input class="inp" id="e-total" type="number" min="1" max="48" value="${m.total || 48}" ${fixedSlots ? 'readonly style="opacity:.6"' : ''}></div>
       </div>
-      <div class="lbl">Prize</div><div style="display:flex;gap:12px;flex-wrap:wrap;">${pf}</div>
+      <div class="lbl">Prize &amp; Rewards</div><div>${pf}</div>
       <div class="lbl" style="margin-top:10px;">Prize Payout Time (optional)</div><input class="inp" id="e-ptime" type="datetime-local" value="${A.esc(m.prizeTime || '')}" style="background:#fff;">
       <div style="display:flex;gap:12px;">
         <div style="flex:1;"><div class="lbl">Room ID</div><input class="inp" id="e-room" value="${A.esc(m.roomId || '')}"></div>
@@ -647,6 +713,7 @@ Object.assign(window.A, {
         <button class="btn btn-outline" style="flex:1;" onclick="A.closeModal('m-edit')">Cancel</button>
         <button class="btn btn-primary" style="flex:1;" onclick="A.saveEdit()"><i class="fa-solid fa-floppy-disk"></i> Save</button>
       </div></div>`;
+    if (!m.paid) A.rwInit('e', pm, (m.teamSize || 1) > 1, m);
     box.classList.add('show');
   },
   async saveEdit() {
@@ -674,14 +741,11 @@ Object.assign(window.A, {
     }
     if (!m.paid) {
       const pm = m.prizeMode || (m.matchType === 'per_kill' ? 'per_kill' : 'match_win');
-      if (pm === 'per_kill') {
-        const k = g('e-p-kill'); if (k <= 0) return A.toast('Enter prize per kill', 'err');
-        upd.prize = k; upd.prizes = {};
-      } else {
-        const n = rankCount(pm), tbl = {};
-        for (let i = 1; i <= n; i++) { const a = g('e-p' + i); if (a <= 0) return A.toast('Enter all prize amounts', 'err'); tbl[i] = a; }
-        upd.prizes = tbl; upd.prize = Object.values(tbl).reduce((a, b) => a + b, 0);
-      }
+      const rb = A.rwBuild('e'); if (rb.err) return A.toast(rb.err, 'err');
+      const n = rankCount(pm), tbl = {}; for (let i = 1; i <= n; i++) tbl[i] = rb.prizes[i] || 0;
+      if (pm === 'per_kill') { upd.prize = rb.perKill || 0; upd.prizes = {}; }
+      else { upd.prizes = tbl; upd.prize = rb.pool; }
+      upd.rewards = rb.rewards;
     }
     try {
       await updateDoc(doc(db, 'matches', m.id), upd);

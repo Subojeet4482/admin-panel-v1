@@ -362,3 +362,19 @@ body{background:radial-gradient(900px 320px at 50% -80px,#e0e7ff 0,transparent 6
 .cm-msg{background:#f8fafc;border-radius:12px;padding:9px 11px;margin-bottom:7px;font-size:.84rem;animation:fadeUp .3s ease both;} .cm-msg.del{opacity:.6;} .cm-msg-t{display:flex;align-items:center;gap:8px;margin-bottom:3px;} .cm-msg-t small{color:var(--sub);font-size:.62rem;flex:1;} .cm-msg-t button{border:0;background:#fee2e2;color:#dc2626;border-radius:8px;width:26px;height:26px;cursor:pointer;}
 
 .dc-month2{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;font-size:.78rem;font-weight:700;}
+
+/* ---- Rewards builder (match create / edit) ---- */
+.rw-step { font-weight:800; font-size:.8rem; color:#7e22ce; margin:12px 0 8px; letter-spacing:.2px; }
+.rw-card { background:#fff; border:1px solid var(--border,#e5e7eb); border-radius:14px; padding:12px; margin-bottom:10px; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+.rw-card.rw-def { background:#faf5ff; border-color:#e9d5ff; }
+.rw-head { display:flex; align-items:center; gap:8px; font-weight:800; font-size:.9rem; margin-bottom:10px; }
+.rw-n { width:22px; height:22px; border-radius:50%; background:#7e22ce; color:#fff; font-size:.72rem; display:flex; align-items:center; justify-content:center; flex:none; }
+.rw-use { font-size:.82rem; background:#f5f3ff; border-radius:10px; padding:8px 10px; margin-bottom:6px; }
+.rw-link { background:none; border:0; color:#7e22ce; font-weight:700; font-size:.76rem; padding:4px 0; cursor:pointer; text-align:left; }
+.rw-sum { margin-top:12px; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:14px; padding:12px; }
+.rw-sum-t { font-weight:800; font-size:.82rem; color:#047857; margin-bottom:8px; }
+.rw-sum-r { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; padding:5px 0; border-bottom:1px dashed #a7f3d0; font-size:.8rem; }
+.rw-sum-r:last-of-type { border-bottom:0; }
+.rw-sum-r span { font-weight:700; color:#065f46; flex:none; }
+.rw-sum-r b { text-align:right; color:#111827; font-weight:700; }
+.rw-sum-f { margin-top:8px; font-size:.74rem; color:#047857; }

@@ -93,6 +93,13 @@ def _roll(c):
     if c["amountMode"] == "fixed": return float(c["fixedAmount"])
     lo, hi = int(c["minAmount"]), int(c["maxAmount"]); return float(random.randint(min(lo, hi), max(lo, hi)))
 
+def _rollf(lo, hi):
+    """Random amount between lo..hi (decimals allowed, 2 places). Whole-number ranges stay whole numbers."""
+    lo = float(lo); hi = max(lo, float(hi))
+    if lo == hi: return round(lo, 2)
+    if lo.is_integer() and hi.is_integer(): return float(random.randint(int(lo), int(hi)))
+    return max(round(lo, 2), min(round(hi, 2), round(random.uniform(lo, hi), 2)))
+
 def scratch(uid, cid):
     c = cfg()
     if not cid.startswith(uid + "_"): return {"ok": False, "error": "Card not found"}
@@ -110,7 +117,8 @@ def scratch(uid, cid):
         if src == "ref": amt, to = _roll(c), c["creditTo"]
         else:   # gift-code / admin card: fixed prize (gift code pool) or a random amount inside the min..max the admin set
             to = cd.get("creditTo", "deposit")
-            amt = float(cd["prize"]) if cd.get("prize") else float(random.randint(int(cd.get("min", 1)), max(int(cd.get("min", 1)), int(cd.get("max", 1)))))
+            mult = max(1, min(50, int(cd.get("mult", 1) or 1))); lo_, hi_ = float(cd.get("min", 1) or 1), float(cd.get("max", 1) or 1); hi_ = max(lo_, hi_)
+            amt = float(cd["prize"]) if cd.get("prize") else round(sum(_rollf(lo_, hi_) for _ in range(mult)), 2)
         dep, wd = _bal(u)
         up = {"withdrawBalance": round(wd + amt, 2), "totalEarned": round(float(u.get("totalEarned", 0) or 0) + amt, 2)} if to == "withdraw" else {"depositBalance": round(dep + amt, 2)}
         tx.update(uref, up); tx.update(cref, {"status": "scratched", "amount": amt, "scratchedAt": NOW(), "creditedTo": to})
@@ -190,15 +198,17 @@ def admin_match_cards(p):
         uid = str((r or {}).get("uid", "")).strip()
         if not uid or "/" in uid: skipped += 1; continue
         try:
-            lo = max(1, int(float(r.get("min", 1) or 1))); hi = max(lo, int(float(r.get("max", lo) or lo)))
+            lo = round(float(r.get("min", 0.1) or 0.1), 2); hi = round(float(r.get("max", lo) or lo), 2)
         except Exception: skipped += 1; continue
-        if hi > 100000: skipped += 1; continue
+        if lo < 0.1 or hi < lo or hi > 999999999: skipped += 1; continue
         if not db.collection("users").document(uid).get().exists: skipped += 1; continue
         label = str(r.get("label", "") or "Reward")[:30]
         note = f"{label} — {title or 'your match'}. Scratch to reveal your prize!"
-        cid = f"{uid}_m{mid}"
+        slot = "".join(ch for ch in str(r.get("slot", "")) if ch.isalnum())[:8]
+        mult = max(1, min(50, int(float(r.get("mult", 1) or 1))))
+        cid = f"{uid}_m{mid}" + (f"_{slot}" if slot else "")
         try:
-            db.collection("ref_cards").document(cid).create({"uid": uid, "seq": 0, "status": "new", "amount": 0, "min": lo, "max": hi, "src": "match", "matchId": mid,
+            db.collection("ref_cards").document(cid).create({"uid": uid, "seq": 0, "status": "new", "amount": 0, "min": lo, "max": hi, "mult": mult, "src": "match", "matchId": mid,
                                                              "creditTo": to, "note": note, "createdAt": NOW()})
         except AlreadyExists: skipped += 1; continue
         issued.append(cid)
@@ -226,7 +236,7 @@ def admin_cards(h=None):
     for s in q.stream():
         x = s.to_dict() or {}
         if not h and x.get("src", "ref") == "ref": continue
-        rows.append({"id": s.id, "uid": x.get("uid"), "src": x.get("src", "ref"), "status": x.get("status"), "amount": x.get("amount", 0), "prize": x.get("prize"), "min": x.get("min"), "max": x.get("max"), "at": x.get("createdAt")})
+        rows.append({"id": s.id, "uid": x.get("uid"), "src": x.get("src", "ref"), "status": x.get("status"), "amount": x.get("amount", 0), "prize": x.get("prize"), "min": x.get("min"), "max": x.get("max"), "mult": x.get("mult", 1), "at": x.get("createdAt")})
     return rows
 
 # ------------------------------------------------------------------ binding a friend
