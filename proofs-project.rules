@@ -1,0 +1,58 @@
+rules_version = '2';
+// ===== PROOFS database (Firebase project: database1-ccd73) =====
+// Firebase Console -> Firestore Database -> Rules -> paste this -> Publish
+// Also enable:  Authentication -> Sign-in method -> Anonymous -> Enable
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function str(v, max) { return v is string && v.size() <= max; }
+
+    match /proofs_feed/{pid} {
+      allow read: if true;                         // public: anyone can view proofs, no login
+
+      // new proof. Doc id = userId_transactionId, so one transaction can only be shared once
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['trxId','uid','name','kind','tone','status','amount','orderNo','trxDate','text','createdAt','likeCount','commentCount','owner'])
+        && request.resource.data.owner == request.auth.uid
+        && pid == request.resource.data.uid + '_' + request.resource.data.trxId
+        && str(request.resource.data.name, 40) && str(request.resource.data.kind, 30) && str(request.resource.data.tone, 10)
+        && str(request.resource.data.status, 20) && str(request.resource.data.amount, 20) && str(request.resource.data.orderNo, 40)
+        && str(request.resource.data.trxDate, 30) && str(request.resource.data.text, 200)
+        && request.resource.data.createdAt is number
+        && request.resource.data.likeCount == 0 && request.resource.data.commentCount == 0;
+
+      allow update: if signedIn() && (
+           // owner edits own text
+           (resource.data.owner == request.auth.uid
+             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text','editedAt'])
+             && str(request.resource.data.text, 200))
+           // like / unlike
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount'])
+             && (request.resource.data.likeCount == resource.data.likeCount + 1 || request.resource.data.likeCount == resource.data.likeCount - 1)
+             && request.resource.data.likeCount >= 0)
+           // comment count
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount'])
+             && (request.resource.data.commentCount == resource.data.commentCount + 1 || request.resource.data.commentCount == resource.data.commentCount - 1)
+             && request.resource.data.commentCount >= 0));
+
+      allow delete: if signedIn() && resource.data.owner == request.auth.uid;
+
+      match /likes/{lid} {
+        allow read: if true;
+        allow create: if signedIn() && request.resource.data.keys().hasOnly(['name','at','by','uid'])
+          && request.resource.data.by == request.auth.uid && str(request.resource.data.name, 40);
+        allow delete: if signedIn() && resource.data.by == request.auth.uid;
+      }
+
+      match /comments/{cid} {
+        allow read: if true;
+        allow create: if signedIn() && request.resource.data.keys().hasOnly(['uid','name','text','at','owner'])
+          && request.resource.data.owner == request.auth.uid
+          && str(request.resource.data.name, 40) && request.resource.data.text is string
+          && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 150;
+        allow delete: if signedIn() && resource.data.owner == request.auth.uid;
+      }
+    }
+  }
+}

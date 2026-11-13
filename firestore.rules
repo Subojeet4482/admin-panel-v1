@@ -158,7 +158,8 @@ service cloud.firestore {
         allow create: if isMe(userId) && validTrxCreate(userId, request.resource.data);
 
         // Only the auto-verify UPI deposit entry (pending -> success/failed)
-        allow update: if isMe(userId) && validDepositTrxUpdate();
+        allow update: if isMe(userId) && (validDepositTrxUpdate()
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isShared','proofId']));   // Proofs: mark a transaction as shared
 
         // A user cannot delete a pending entry (the admin must be able to see it)
         allow delete: if isMe(userId) && resource.data.status != 'pending';

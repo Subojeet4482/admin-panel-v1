@@ -164,3 +164,43 @@ def dec(v, db=None):
     if isinstance(v, list):
         return [dec(x, db) for x in v]
     return v
+
+
+# ------------------------------------------------------------------ PROOFS database (teesra Firebase project: database1-ccd73)
+# Env: FIREBASE_CREDENTIALS_B642  (ya FIREBASE_CREDENTIALS_B64_2) = proofs project ki service-account JSON (base64).
+# Set nahi hai to proofs ka data panel se delete / usage nahi dikhega (baaki sab chalta rahega).
+_proofs_app = None
+_proofs_db = None
+_proofs_err = None
+
+
+def proofs_env():
+    for k in ("FIREBASE_CREDENTIALS_B642", "FIREBASE_CREDENTIALS_B64_2"):
+        v = (os.environ.get(k) or "").strip()
+        if v:
+            return v
+    return ""
+
+
+def get_proofs_db():
+    """Proofs ka Firestore client, ya None (env set nahi / key galat)."""
+    global _proofs_app, _proofs_db, _proofs_err
+    raw = proofs_env()
+    if not raw:
+        return None
+    if _proofs_db is not None:
+        return _proofs_db
+    try:
+        info = json.loads(raw) if raw.startswith("{") else json.loads(base64.b64decode(raw + "=" * (-len(raw) % 4)).decode("utf-8"))
+        get_db()
+        _proofs_app = firebase_admin.initialize_app(credentials.Certificate(info), name="proofs")
+        _proofs_db = firestore.client(app=_proofs_app)
+        _proofs_err = None
+        return _proofs_db
+    except Exception as e:
+        _proofs_err = str(e)
+        return None
+
+
+def proofs_status():
+    return {"configured": bool(proofs_env()), "ok": _proofs_db is not None, "error": _proofs_err}

@@ -94,6 +94,7 @@ A.editBannedWords = async function(){
   const _old = document.getElementById('banned-words-modal'); if(_old) _old.remove();
   const s = await getDoc(doc(db,'config','chat_words'));
   const cur = s.exists() ? (s.data().words||[]) : [];
+  const cfg0 = s.exists() ? s.data() : {};
   const modal = document.createElement('div');
   modal.id = 'banned-words-modal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-end;justify-content:center;';
@@ -103,7 +104,9 @@ A.editBannedWords = async function(){
         <div style="font-weight:800;font-size:1.05rem;"><i class="fa-solid fa-ban" style="color:#dc2626;"></i> Banned Words</div>
         <button onclick="document.getElementById('banned-words-modal').remove()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;">&times;</button>
       </div>
-      <div style="font-size:0.78rem;color:#666;">Messages containing any of these words will be auto-blocked and deleted from World Chat.</div>
+      <div style="font-size:0.78rem;color:#666;">Jo user in words ko likhega (Proofs post / comment / Chat), website bolegi \"<word> word block hai\" aur message nahi jayega. Ek hi word ya phrase likho; CAPITAL, f.u.c.k, fuuuck jaise tricks bhi pakde jate hain.</div>
+      <label style=\"display:flex;align-items:center;gap:8px;font-size:.85rem;font-weight:700;\"><input type=\"checkbox\" id=\"bw-on\" ${cfg0.enabled===false?'':'checked'}> Bad word filter ON</label>
+      <input id=\"bw-msg\" value=\"${String(cfg0.msg||'').replace(/\"/g,'&quot;')}\" placeholder=\"Block message (optional) — {word} likho jahan word dikhana ho\" style=\"padding:10px;border:1px solid #ddd;border-radius:10px;font-size:.85rem;\">
       <div style="display:flex;gap:6px;">
         <input id="bw-new" placeholder="Add word or phrase..." style="flex:1;padding:10px;border:1px solid #ddd;border-radius:10px;font-size:0.9rem;">
         <button id="bw-add" style="background:#4f46e5;color:#fff;border:none;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">Add</button>
@@ -132,7 +135,7 @@ A.editBannedWords = async function(){
   modal.querySelector('#bw-new').addEventListener('keydown', e=>{ if(e.key==='Enter') modal.querySelector('#bw-add').click(); });
   modal.querySelector('#bw-clear').onclick = () => { if(confirm('Remove all banned words?')){ words=[]; render(); } };
   modal.querySelector('#bw-save').onclick = async () => {
-    await setDoc(doc(db,'config','chat_words'),{words, updatedAt: new Date()},{merge:true});
+    await setDoc(doc(db,'config','chat_words'),{words, enabled: modal.querySelector('#bw-on').checked, msg: modal.querySelector('#bw-msg').value.trim().slice(0,120), updatedAt: new Date()},{merge:true});
     A.toast('Saved '+words.length+' banned words');
     modal.remove();
   };

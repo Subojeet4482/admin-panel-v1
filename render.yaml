@@ -25,6 +25,8 @@ services:
         sync: false
       - key: FIREBASE_CREDENTIALS_B641
         sync: false
+      - key: FIREBASE_CREDENTIALS_B642
+        sync: false
       - key: CHAT_CORS_ORIGIN
         value: "*"
       - key: LOGIN_MAX_FAILS

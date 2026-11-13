@@ -22,6 +22,7 @@ import './bomb.js';
 import './lbmanager.js';
 import './referral.js';
 import './siblings.js';
+import './datatools.js';   // storage usage + full user delete (overrides deleteUser / dbmDeleteUserCascade)
 
 // goTab hook: extra loading for finance / chat / reports / backup
 const _origGoTab = A.goTab;

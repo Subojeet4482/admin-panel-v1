@@ -4,7 +4,7 @@ import os, time, threading
 from flask import Flask, jsonify, request, send_from_directory, g, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-import fb, security, sysmon, jobs, chatadmin, keepalive, opsapi, panel, ballgame, bombgame, referral
+import fb, security, sysmon, jobs, chatadmin, keepalive, opsapi, panel, ballgame, bombgame, referral, dataops
 import admin_lite as lite  # LITE panel (sub-admin: users/wallet/matches/settings)
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -264,6 +264,29 @@ def ca_delete(kind, cid):
 @security.pin_required
 def ca_world_clear():
     try: return ok(deleted=chatadmin.world_clear())
+    except Exception as e: return bad(str(e), 500)
+
+
+# ---- delete a user's EVERY data (main + chat + proofs db + logins), background job ----
+@app.post("/api/users/<uid>/purge")
+@security.pin_required
+def user_purge(uid):
+    try: return ok(jobId=dataops.start_purge(uid))
+    except Exception as e: return bad(str(e), 400)
+
+
+@app.get("/api/purge/<jid>")
+@security.login_required
+def user_purge_status(jid):
+    j = dataops.job(jid)
+    return ok(job=j) if j else bad("job nahi mila", 404)
+
+
+# ---- Firebase storage usage (used / left) ----
+@app.get("/api/storage/usage")
+@security.login_required
+def storage_usage():
+    try: return ok(usage=dataops.usage(refresh=request.args.get("refresh") == "1"))
     except Exception as e: return bad(str(e), 500)
 
 
