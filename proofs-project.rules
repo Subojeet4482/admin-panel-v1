@@ -13,12 +13,13 @@ service cloud.firestore {
 
       // new proof. Doc id = userId_transactionId, so one transaction can only be shared once
       allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['trxId','uid','name','kind','tone','status','amount','orderNo','trxDate','text','createdAt','likeCount','commentCount','owner'])
+        && request.resource.data.keys().hasOnly(['trxId','uid','name','kind','tone','status','amount','orderNo','trxDate','text','createdAt','likeCount','commentCount','owner','via','refLabel','refMask'])
         && request.resource.data.owner == request.auth.uid
         && pid == request.resource.data.uid + '_' + request.resource.data.trxId
         && str(request.resource.data.name, 40) && str(request.resource.data.kind, 30) && str(request.resource.data.tone, 10)
         && str(request.resource.data.status, 20) && str(request.resource.data.amount, 20) && str(request.resource.data.orderNo, 40)
         && str(request.resource.data.trxDate, 30) && str(request.resource.data.text, 200)
+        && str(request.resource.data.via, 30) && str(request.resource.data.refLabel, 20) && str(request.resource.data.refMask, 60)
         && request.resource.data.createdAt is number
         && request.resource.data.likeCount == 0 && request.resource.data.commentCount == 0;
 
