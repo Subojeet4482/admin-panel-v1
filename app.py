@@ -282,6 +282,35 @@ def user_purge_status(jid):
     return ok(job=j) if j else bad("job nahi mila", 404)
 
 
+# ---- Proofs moderation: list (with real UTR / gift code), delete post, delete comment ----
+@app.get("/api/proofs/list")
+@security.login_required
+def proofs_admin_list():
+    try: return ok(items=dataops.proofs_list(request.args.get("limit", 50)))
+    except Exception as e: return bad(str(e), 500)
+
+
+@app.post("/api/proofs/<pid>/delete")
+@security.pin_required
+def proofs_admin_delete(pid):
+    try: return ok(**dataops.proof_delete(pid))
+    except Exception as e: return bad(str(e), 500)
+
+
+@app.get("/api/proofs/<pid>/comments")
+@security.login_required
+def proofs_admin_comments(pid):
+    try: return ok(items=dataops.proof_comments(pid))
+    except Exception as e: return bad(str(e), 500)
+
+
+@app.post("/api/proofs/<pid>/comments/<cid>/delete")
+@security.pin_required
+def proofs_admin_comment_delete(pid, cid):
+    try: return ok(**dataops.comment_delete(pid, cid))
+    except Exception as e: return bad(str(e), 500)
+
+
 # ---- Firebase storage usage (used / left) ----
 @app.get("/api/storage/usage")
 @security.login_required

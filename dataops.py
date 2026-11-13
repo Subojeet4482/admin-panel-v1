@@ -298,3 +298,86 @@ def usage(refresh=False):
             "note": "Firestore size ek ANDAZA hai (document count x sample size). Exact numbers + aaj ke reads/writes: Firebase Console -> Usage."}
     _CACHE["t"] = time.time(); _CACHE["data"] = data
     return data
+
+
+# ============================================================== PROOFS MODERATION (admin)
+def _n(v):
+    try:
+        return float(str(v).replace("₹", "").replace(",", "").replace("-", "").replace("+", "").strip())
+    except Exception:
+        return None
+
+
+def proofs_list(limit=50):
+    """Latest proofs + asli transaction ka data (full UTR / gift code) — sirf admin ko dikhta hai."""
+    pdb = fb.get_proofs_db()
+    if pdb is None:
+        raise RuntimeError("Proofs database connect nahi: Render env FIREBASE_CREDENTIALS_B642 set karo")
+    from google.cloud.firestore import Query
+    limit = max(1, min(int(limit or 50), 200))
+    snaps = list(pdb.collection("proofs_feed").order_by("createdAt", direction=Query.DESCENDING).limit(limit).stream())
+    main = fb.get_db()
+    refs = [main.collection("users").document(s.to_dict().get("uid", "_")).collection("transactions").document(s.to_dict().get("trxId", "_")) for s in snaps]
+    real = {}
+    try:
+        for t in main.get_all(refs):
+            real[t.reference.path] = t.to_dict() if t.exists else None
+    except Exception:
+        pass
+    out = []
+    for s, r in zip(snaps, refs):
+        d = s.to_dict() or {}
+        t = real.get(r.path)
+        item = {"id": s.id, "uid": d.get("uid"), "name": d.get("name"), "kind": d.get("kind"), "tone": d.get("tone"), "amount": d.get("amount"),
+                "via": d.get("via"), "refLabel": d.get("refLabel"), "refMask": d.get("refMask"), "orderNo": d.get("orderNo"), "text": d.get("text"),
+                "createdAt": d.get("createdAt"), "likeCount": d.get("likeCount", 0), "commentCount": d.get("commentCount", 0), "trxId": d.get("trxId")}
+        if t is None:
+            item["check"] = "missing"                      # asli transaction nahi mili -> fake ho sakta hai
+        else:
+            ok_amt = _n(t.get("amount")) == _n(d.get("amount"))
+            item["check"] = "ok" if ok_amt else "mismatch"
+            item["real"] = {"method": t.get("method"), "status": t.get("status"), "amount": t.get("amount"), "utr": t.get("trxId"),
+                            "giftCode": t.get("giftCode"), "upiId": t.get("upiId"), "type": t.get("type")}
+        out.append(item)
+    return out
+
+
+def proof_delete(pid):
+    pdb = fb.get_proofs_db()
+    if pdb is None:
+        raise RuntimeError("Proofs database connect nahi")
+    ref = pdb.collection("proofs_feed").document(pid)
+    s = ref.get()
+    if not s.exists:
+        return {"deleted": False}
+    d = s.to_dict() or {}
+    slow.delete_tree(pdb, ref)
+    try:                                                    # user dobara share kar sake
+        if d.get("uid") and d.get("trxId"):
+            fb.get_db().collection("users").document(d["uid"]).collection("transactions").document(d["trxId"]).update({"isShared": False, "proofId": ""})
+    except Exception:
+        pass
+    return {"deleted": True}
+
+
+def proof_comments(pid):
+    pdb = fb.get_proofs_db()
+    if pdb is None:
+        raise RuntimeError("Proofs database connect nahi")
+    from google.cloud.firestore import Query
+    return [{"id": c.id, **(c.to_dict() or {})} for c in pdb.collection("proofs_feed").document(pid).collection("comments").order_by("at", direction=Query.DESCENDING).limit(100).stream()]
+
+
+def comment_delete(pid, cid):
+    pdb = fb.get_proofs_db()
+    if pdb is None:
+        raise RuntimeError("Proofs database connect nahi")
+    c = pdb.collection("proofs_feed").document(pid).collection("comments").document(cid)
+    if c.get().exists:
+        c.delete()
+        try:
+            pdb.collection("proofs_feed").document(pid).update({"commentCount": gfs.Increment(-1)})
+        except Exception:
+            pass
+        return {"deleted": True}
+    return {"deleted": False}
