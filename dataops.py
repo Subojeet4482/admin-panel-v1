@@ -75,7 +75,7 @@ def purge_user(j, uid):
     # ---------------- MAIN database ----------------
     _step(j, "Match participation", lambda: _clean_matches(db, uid))
     _step(j, "Leaderboard entries", lambda: _clean_lb(db, uid))
-    _step(j, "Game stats + referral", lambda: sum(1 for c, i in (("bomb_stats", uid), ("ball_stats", uid), ("referrals", uid)) if _del_doc(db.collection(c).document(i)))
+    _step(j, "Game stats + referral", lambda: sum(1 for c, i in (("fruit_stats", uid), ("bomb_stats", uid), ("ball_stats", uid), ("referrals", uid)) if _del_doc(db.collection(c).document(i)))
           + _del_query(db, db.collection("ref_cards").where("uid", "==", uid)))
     _step(j, "Deposit requests", lambda: _del_query(db, db.collection("deposit_requests").where("uid", "==", uid)))
     _step(j, "Blue tick list", lambda: _untick(db, "config", uid))

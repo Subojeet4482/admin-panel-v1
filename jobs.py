@@ -59,18 +59,22 @@ def _loop():
 
 def _ball_loop():
     """Coin Battle housekeeping: resume games after a restart, settle abandoned games, drop old finished games."""
-    import ballgame, bombgame, referral
+    import ballgame, bombgame, fruitgame, referral
     time.sleep(20)
     try: print(f"[ball] restored {ballgame.restore()} running game(s)", flush=True)
     except Exception as e: print("[ball] restore:", e, flush=True)
     try: print(f"[bomb] restored {bombgame.restore()} running game(s)", flush=True)
     except Exception as e: print("[bomb] restore:", e, flush=True)
+    try: print(f"[fruit] restored {fruitgame.restore()} running game(s)", flush=True)
+    except Exception as e: print("[fruit] restore:", e, flush=True)
     last_purge = 0; last_ref = 0
     while True:
         try: ballgame.janitor()
         except Exception as e: print("[ball] janitor:", e, flush=True)
         try: bombgame.janitor()
         except Exception as e: print("[bomb] janitor:", e, flush=True)
+        try: fruitgame.janitor()
+        except Exception as e: print("[fruit] janitor:", e, flush=True)
         if time.time() - last_ref > 600:      # friend deposited enough? -> referral qualifies -> scratch card issued
             last_ref = time.time()
             try: referral.qualify_pending()
@@ -81,6 +85,8 @@ def _ball_loop():
             except Exception as e: print("[ball] purge:", e, flush=True)
             try: bombgame.purge_old(14)
             except Exception as e: print("[bomb] purge:", e, flush=True)
+            try: fruitgame.purge_old(14)
+            except Exception as e: print("[fruit] purge:", e, flush=True)
         time.sleep(15)
 
 

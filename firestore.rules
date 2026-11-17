@@ -709,5 +709,11 @@ service firebase.storage {
       allow read: if request.auth != null && request.auth.uid in resource.data.uids;
       allow write: if false;
     }
+
+    // Fruit Slash (real-time duel): written ONLY by the server; players read their own game live (opponent's score arrives through this).
+    match /fruit_games/{gid} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.uids;
+      allow write: if false;
+    }
   }
 }
