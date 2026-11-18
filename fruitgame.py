@@ -18,7 +18,7 @@ from firebase_admin import firestore as fs
 import fb, security, ballgame as B
 from ballgame import NOW, debit, credit, lb_add, player_info, today, _bal, _cors, _out, _rate
 
-DEFAULT_CFG = {"enabled": True, "entries": [2, 5, 10], "cutPct": 10, "durationSec": 60, "paidSearchSec": 40, "maxStake": 100}
+DEFAULT_CFG = {"enabled": True, "freeEnabled": True, "entries": [2, 5, 10], "cutPct": 10, "durationSec": 60, "paidSearchSec": 40, "maxStake": 100}
 GRACE_MS = 4500          # after time is up, late reports are still accepted for this long
 COUNTDOWN_MS = 5500      # shared "3-2-1" before the first fruit (reveal screen + countdown)
 FLIGHT_MS = 2300         # a fruit is slice-able from spawn until ~FLIGHT_MS later (flight time does not depend on the screen size)
@@ -60,11 +60,12 @@ def save_cfg(patch):
     for k, lo, hi in (("cutPct", 0, 50), ("durationSec", 20, 120), ("paidSearchSec", 4, 120), ("maxStake", 1, 1000)):
         if k in patch: v[k] = max(lo, min(hi, int(patch[k])))
     if "enabled" in patch: v["enabled"] = bool(patch["enabled"])
+    if "freeEnabled" in patch: v["freeEnabled"] = bool(patch["freeEnabled"])
     fb.get_db().collection("config").document("fruit").set(v); _publish(v.get("enabled", True)); _cfg.update(t=time.time(), v=v); return v
 
 
 def public_cfg():
-    c = cfg(); return {k: c[k] for k in ("enabled", "entries", "cutPct", "durationSec", "paidSearchSec")}
+    c = cfg(); return {k: c.get(k) for k in ("enabled", "freeEnabled", "entries", "cutPct", "durationSec", "paidSearchSec")}
 
 
 def glock(gid):

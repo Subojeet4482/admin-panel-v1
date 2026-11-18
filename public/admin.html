@@ -137,6 +137,10 @@
       <div class="menu-btn-icon" style="background:#e11d48;"><i class="fa-solid fa-bomb"></i></div>
       <div class="menu-btn-lbl">Bomb &amp; Gems</div>
     </div>
+    <div class="menu-btn" onclick="A.goTab('fruit')">
+      <div class="menu-btn-icon" style="background:#f97316;"><i class="fa-solid fa-apple-whole"></i></div>
+      <div class="menu-btn-lbl">Fruit Slash</div>
+    </div>
     <div class="menu-btn" onclick="A.goTab('lbm')">
       <div class="menu-btn-icon" style="background:#f59e0b;"><i class="fa-solid fa-ranking-star"></i></div>
       <div class="menu-btn-lbl">Leaderboard</div>
@@ -378,6 +382,31 @@
   </div>
 </div>
 
+<div id="tab-fruit" class="tab">
+  <div class="top-bar">
+    <h2 style="font-size:1.1rem;font-weight:800;"><i class="fa-solid fa-apple-whole" style="color:#f97316;"></i> Fruit Slash</h2>
+    <button class="btn btn-outline" style="padding:6px 12px;font-size:0.78rem;" onclick="A.goTab('dash')"><i class="fa-solid fa-arrow-left"></i> Back</button>
+  </div>
+  <div class="page-pad" style="padding-top:14px;">
+    <div class="card" style="border:2px solid #f9731633"><div class="card-h">Show in app</div>
+      <label class="ls-switch2"><input type="checkbox" id="fr-enabled" onchange="A.fruitToggle(this)"><i></i><span><b>Fruit Slash ON</b> — OFF hides the game from the app page and blocks play (saved instantly)</span></label>
+    </div>
+    <div class="ball-stats" id="fruit-stats"><span class="muted">Loading…</span></div>
+    <div class="card"><div class="card-h">Game settings <span class="muted" style="font-weight:600">(live — no restart)</span></div>
+      <label class="ls-switch2" style="margin-top:8px"><input type="checkbox" id="fr-free"><i></i><span>Free match allowed (solo, no time limit, no prize — runs only on the phone, costs nothing)</span></label>
+      <div class="lbl" style="margin-top:12px">Entry amounts ₹ (comma separated)</div><input class="inp" id="fr-entries" placeholder="2,5,10">
+      <div class="ball-grid">
+        <div><div class="lbl">Platform cut %</div><input class="inp" id="fr-cut" type="number" min="0" max="50"></div>
+        <div><div class="lbl">Match length (sec)</div><input class="inp" id="fr-dur" type="number" min="20" max="120"></div>
+        <div><div class="lbl">Cash match search time (sec) — real players only</div><input class="inp" id="fr-search" type="number" min="4" max="120"></div>
+        <div><div class="lbl">Highest entry allowed ₹</div><input class="inp" id="fr-max" type="number" min="1" max="1000"></div>
+      </div>
+      <div class="muted" style="font-size:.72rem;margin:6px 0 10px">Live 1v1: the SERVER makes the fruit list, both players start at the same server time and see the same fruits. The server checks every slice, so scores cannot be faked. Higher score wins 2 × entry minus the cut (10% → 1.8 × entry); equal score = both refunded. Cash matches never get a bot. Entry is charged only when a real opponent is found.</div>
+      <button class="btn btn-primary btn-full" onclick="A.fruitSave()"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
+    </div>
+    <div class="card"><div class="card-h">Recent games <button class="btn btn-outline" style="float:right;padding:4px 10px;font-size:.72rem" onclick="A.fruitLoad()"><i class="fa-solid fa-rotate"></i></button></div><div id="fruit-games"></div></div>
+  </div>
+</div>
 <div id="tab-bomb" class="tab">
   <div class="top-bar">
     <h2 style="font-size:1.1rem;font-weight:800;"><i class="fa-solid fa-bomb" style="color:#7c3aed;"></i> Bomb &amp; Gems</h2>

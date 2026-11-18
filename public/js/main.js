@@ -19,6 +19,7 @@ import './reports.js';
 import './ops.js';
 import './ball.js';
 import './bomb.js';
+import './fruit.js';
 import './lbmanager.js';
 import './referral.js';
 import './siblings.js';
@@ -37,6 +38,7 @@ A.goTab = function(id){
   if(id==='gift') A.gfLoad();
   if(id==='ball') A.ballLoad();
   if(id==='bomb') A.bombLoad();
+  if(id==='fruit') A.fruitLoad();
   if(id==='lbm') A.lbmLoad();
   if(id==='refer') A.referLoad();
 };
